@@ -1,0 +1,9 @@
+/* Super Admin Portal Theme – Purple / Violet */
+:root{
+  --primary:#7c3aed;--primary-dk:#6d28d9;
+  --sidebar:#2e1065;--sidebar-txt:#ddd6fe;
+  --bg:#faf5ff;
+}
+.form-control:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(124,58,237,.12)}
+#auth-view{background:linear-gradient(135deg,#7c3aed,#2e1065)}
+.auth-logo h1{color:var(--primary)}

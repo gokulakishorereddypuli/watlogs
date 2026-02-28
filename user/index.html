@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WatLogs – User Portal</title>
+  <link rel="stylesheet" href="../css/shared.css">
+  <link rel="stylesheet" href="../css/user.css">
+</head>
+<body>
+
+<div id="dashboard-view">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>🕐 WatLogs</h2>
+      <p id="sb-role-lbl">User Portal</p>
+    </div>
+    <nav class="sidebar-nav" id="sb-nav"></nav>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="avatar" id="sb-avatar">?</div>
+        <div>
+          <div class="u-name" id="sb-uname">—</div>
+          <div class="u-role" id="sb-urole">—</div>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-full btn-sm"
+        style="color:#cbd5e1;border-color:rgba(255,255,255,.2)"
+        onclick="doLogout()">🚪 Sign Out</button>
+    </div>
+  </aside>
+  <main class="main-content" id="main-content"></main>
+</div>
+
+<div id="modal-root"></div>
+
+<script src="../js/core.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+'use strict';
+window.AUTH_PATH = '../';
+
+function init(){
+  bootstrap();
+  const sess = Auth.restore();
+  if(!sess || sess.role !== 'user'){
+    window.location.href = window.AUTH_PATH;
+    return;
+  }
+  loadApp();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
