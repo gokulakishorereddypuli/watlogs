@@ -946,7 +946,7 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
                   AND    (p_from_date     IS NULL OR
                           h.login_time >= TO_TIMESTAMP_TZ(p_from_date,'YYYY-MM-DD'))
                   AND    (p_to_date       IS NULL OR
-                          h.login_time <  TO_TIMESTAMP_TZ(p_to_date,'YYYY-MM-DD') + 1)
+                          h.login_time <  TO_TIMESTAMP_TZ(p_to_date,'YYYY-MM-DD') + INTERVAL '1' DAY)
                   ORDER  BY h.login_time DESC) LOOP
             v_json := v_json || v_comma
                    || hist_row_json(r.id, r.username, r.role,
@@ -1045,9 +1045,10 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
             WHEN NO_DATA_FOUND THEN
                 p_http_status:=404; p_result:=json_error('Active check-in not found.'); RETURN;
         END;
-        v_dur := ROUND((EXTRACT(DAY  FROM(v_now - v_ci_row.checkin_time))*1440
-                       +EXTRACT(HOUR FROM(v_now - v_ci_row.checkin_time))*60
-                       +EXTRACT(MINUTE FROM(v_now - v_ci_row.checkin_time))));
+        v_dur := ROUND((EXTRACT(DAY    FROM(v_now - v_ci_row.checkin_time))*86400
+                       +EXTRACT(HOUR   FROM(v_now - v_ci_row.checkin_time))*3600
+                       +EXTRACT(MINUTE FROM(v_now - v_ci_row.checkin_time))*60
+                       +EXTRACT(SECOND FROM(v_now - v_ci_row.checkin_time))) / 60);
         UPDATE wl_checkins SET checkout_time = v_now, duration_mins = v_dur,
                                updated_at    = v_now
         WHERE  id = p_checkin_id;
