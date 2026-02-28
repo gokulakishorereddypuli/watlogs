@@ -59,6 +59,7 @@ DECLARE
   v_username    VARCHAR2(100);
   v_password    VARCHAR2(500);
   v_role        VARCHAR2(20);
+  v_ip_raw      VARCHAR2(512);
   v_ip          VARCHAR2(50);
   v_cap_token   VARCHAR2(100);
   v_cap_answer  VARCHAR2(100);
@@ -69,11 +70,12 @@ BEGIN
   v_role       := APEX_JSON.GET_VARCHAR2('role');
   v_cap_token  := APEX_JSON.GET_VARCHAR2('captchaToken');
   v_cap_answer := APEX_JSON.GET_VARCHAR2('captchaAnswer');
-  v_ip := COALESCE(
+  v_ip_raw := COALESCE(
     OWA_UTIL.GET_CGI_ENV('X-Forwarded-For'),
     OWA_UTIL.GET_CGI_ENV('REMOTE_ADDR'),
     '127.0.0.1'
   );
+  v_ip := SUBSTR(TRIM(REGEXP_SUBSTR(v_ip_raw, '[^,]+')), 1, 50);
   wl_pkg.do_login(v_username, v_password, v_role, v_ip,
                   v_cap_token, v_cap_answer, v_result, v_status);
   :status := v_status;
