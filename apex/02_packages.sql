@@ -149,9 +149,9 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
     FUNCTION hash_password(p_password IN VARCHAR2) RETURN VARCHAR2 IS
     BEGIN
         RETURN LOWER(RAWTOHEX(
-            DBMS_CRYPTO.HASH(
+            APEX_CRYPTO.HASH(
                 UTL_RAW.CAST_TO_RAW(p_password || c_salt),
-                DBMS_CRYPTO.HASH_SH256
+                APEX_CRYPTO.HASH_SH256
             )
         ));
     END hash_password;
@@ -162,7 +162,7 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
     FUNCTION generate_id RETURN VARCHAR2 IS
     BEGIN
         RETURN 'id' || TO_CHAR(SYSTIMESTAMP,'YYYYMMDDHH24MISSFF6')
-                    || LOWER(RAWTOHEX(DBMS_CRYPTO.RANDOMBYTES(4)));
+                    || LOWER(SUBSTR(RAWTOHEX(SYS_GUID()), 1, 8));
     END generate_id;
 
     -- ──────────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
                     WHEN '-' THEN ABS(v_a - v_b)
                     ELSE          v_a * v_b
                  END;
-        p_token    := LOWER(RAWTOHEX(DBMS_CRYPTO.RANDOMBYTES(16)));
+        p_token    := LOWER(RAWTOHEX(SYS_GUID()));
         p_question := v_a || ' ' || v_op || ' ' || v_b || ' = ?';
         INSERT INTO wl_captcha (token, answer, created_at, expires_at, used)
         VALUES (p_token, TO_CHAR(v_ans), SYSTIMESTAMP,
@@ -494,8 +494,7 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
                 RETURN;
         END;
 
-        UPDATE wl_sessions SET active = 0, logout_time = v_now,
-                               updated_at = v_now
+        UPDATE wl_sessions SET active = 0, logout_time = v_now
         WHERE  id = p_session_id;
 
         UPDATE wl_login_history
@@ -1151,7 +1150,7 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
             DECLARE
                 v_val VARCHAR2(4000);
             BEGIN
-                v_val := APEX_JSON.GET_VARCHAR2(v_keys, r.setting_key);
+                v_val := APEX_JSON.GET_VARCHAR2(r.setting_key, p_values => v_keys);
                 IF v_val IS NOT NULL THEN
                     set_setting(r.setting_key, v_val, v_uname);
                 END IF;
@@ -1195,18 +1194,18 @@ CREATE OR REPLACE PACKAGE BODY wl_pkg AS
         END IF;
         -- p_users_json expected: [{"username":…,"password":…,"legalName":…,"email":…,"contact":…},…]
         APEX_JSON.PARSE(v_errs_arr, p_users_json);
-        v_n := APEX_JSON.GET_COUNT(v_errs_arr, '.');
+        v_n := APEX_JSON.GET_COUNT('.', p_values => v_errs_arr);
         DECLARE
             v_errors_out VARCHAR2(32767) := '[';
             v_ec_comma   VARCHAR2(1)     := '';
         BEGIN
             FOR i IN 1..v_n LOOP
                 BEGIN
-                    v_uname2 := APEX_JSON.GET_VARCHAR2(v_errs_arr, '[%d].username', i);
-                    v_pass   := APEX_JSON.GET_VARCHAR2(v_errs_arr, '[%d].password', i);
-                    v_lname  := APEX_JSON.GET_VARCHAR2(v_errs_arr, '[%d].legalName', i);
-                    v_email  := APEX_JSON.GET_VARCHAR2(v_errs_arr, '[%d].email', i);
-                    v_cont   := APEX_JSON.GET_VARCHAR2(v_errs_arr, '[%d].contact', i);
+                    v_uname2 := APEX_JSON.GET_VARCHAR2('[%d].username', TO_CHAR(i), p_values => v_errs_arr);
+                    v_pass   := APEX_JSON.GET_VARCHAR2('[%d].password', TO_CHAR(i), p_values => v_errs_arr);
+                    v_lname  := APEX_JSON.GET_VARCHAR2('[%d].legalName', TO_CHAR(i), p_values => v_errs_arr);
+                    v_email  := APEX_JSON.GET_VARCHAR2('[%d].email',    TO_CHAR(i), p_values => v_errs_arr);
+                    v_cont   := APEX_JSON.GET_VARCHAR2('[%d].contact',  TO_CHAR(i), p_values => v_errs_arr);
                     IF v_uname2 IS NULL OR v_pass IS NULL THEN
                         v_errors_out := v_errors_out || v_ec_comma
                             || APEX_JSON.STRINGIFY('Row '||i||': username and password required');
