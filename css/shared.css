@@ -138,7 +138,11 @@ tr:hover td{background:#fafbfc}
 .filter-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
 .filter-row .form-group{margin-bottom:0}
 
-/* ── Misc ── */
+/* ── Captcha ── */
+.captcha-wrap{display:flex;align-items:center;gap:10px}
+#captcha-canvas{border:1.5px solid var(--border);border-radius:8px;background:#f8fafc;display:block}
+.captcha-refresh{font-size:18px;padding:6px 12px;flex-shrink:0}
+
 .empty{text-align:center;padding:40px 16px;color:var(--muted)}
 .empty-icon{font-size:44px;margin-bottom:10px}
 .divider{height:1px;background:var(--border);margin:14px 0}

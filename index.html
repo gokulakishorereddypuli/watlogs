@@ -39,6 +39,14 @@
         <label>Password</label>
         <input type="password" class="form-control" id="l-pass" placeholder="Enter password" autocomplete="current-password">
       </div>
+      <div class="form-group">
+        <label>Captcha Verification</label>
+        <div class="captcha-wrap">
+          <canvas id="captcha-canvas" width="200" height="54" title="Captcha image"></canvas>
+          <button type="button" class="btn btn-outline btn-sm captcha-refresh" onclick="refreshCaptcha()" title="Refresh captcha" aria-label="Refresh captcha">&#x21bb;</button>
+        </div>
+        <input type="text" class="form-control" id="l-captcha" placeholder="Enter captcha text above" autocomplete="off" style="margin-top:8px" maxlength="6">
+      </div>
       <button class="btn btn-primary btn-full" id="login-btn" onclick="doLogin()">Sign In</button>
     </div>
 
@@ -85,6 +93,53 @@
 <script>
 'use strict';
 
+/* ── Captcha ── */
+let _captchaCode = '';
+
+function refreshCaptcha(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for(let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
+  _captchaCode = code;
+  const canvas = document.getElementById('captcha-canvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  // Background
+  ctx.clearRect(0,0,W,H);
+  const grad = ctx.createLinearGradient(0,0,W,H);
+  grad.addColorStop(0,'#e0e7ff'); grad.addColorStop(1,'#f0fdf4');
+  ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+  // Noise lines
+  for(let i=0;i<6;i++){
+    ctx.beginPath();
+    ctx.strokeStyle=`hsl(${Math.random()*360},50%,70%)`;
+    ctx.lineWidth=1.2;
+    ctx.moveTo(Math.random()*W, Math.random()*H);
+    ctx.lineTo(Math.random()*W, Math.random()*H);
+    ctx.stroke();
+  }
+  // Noise dots
+  for(let i=0;i<30;i++){
+    ctx.beginPath();
+    ctx.fillStyle=`hsla(${Math.random()*360},40%,60%,.5)`;
+    ctx.arc(Math.random()*W,Math.random()*H,1.2,0,Math.PI*2);
+    ctx.fill();
+  }
+  // Characters
+  for(let i=0;i<code.length;i++){
+    ctx.save();
+    ctx.font = `bold ${22+Math.floor(Math.random()*8)}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle = `hsl(${Math.random()*60+200},60%,35%)`;
+    const x = 12 + i*29 + (Math.random()*6-3);
+    const y = 30 + (Math.random()*12-6);
+    ctx.translate(x,y);
+    ctx.rotate((Math.random()-.5)*.5);
+    ctx.fillText(code[i],0,0);
+    ctx.restore();
+  }
+}
+
 function showAuthAlert(msg, type='error'){
   document.getElementById('auth-alert').innerHTML=`<div class="alert alert-${type}">${U.esc(msg)}</div>`;
 }
@@ -100,12 +155,25 @@ async function doLogin(){
   const username=document.getElementById('l-user').value.trim();
   const password=document.getElementById('l-pass').value;
   const role=document.getElementById('l-role').value;
+  const captchaInput=document.getElementById('l-captcha').value.trim().toUpperCase();
   if(!username||!password){showAuthAlert('Please enter username and password.');return;}
+  if(!captchaInput){showAuthAlert('Please enter the captcha text.');return;}
+  if(captchaInput!==_captchaCode){
+    showAuthAlert('Incorrect captcha. Please try again.');
+    refreshCaptcha();
+    document.getElementById('l-captcha').value='';
+    return;
+  }
   const btn=document.getElementById('login-btn');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
   const r=await Auth.login(username,password,role);
   btn.disabled=false; btn.innerHTML='Sign In';
-  if(!r.ok){showAuthAlert(r.err);return;}
+  if(!r.ok){
+    showAuthAlert(r.err);
+    refreshCaptcha();
+    document.getElementById('l-captcha').value='';
+    return;
+  }
   // Redirect to the appropriate role portal
   if(Auth.s.role==='superadmin') window.location.href='superadmin/';
   else if(Auth.s.role==='admin') window.location.href='admin/';
@@ -139,8 +207,9 @@ async function init(){
     else window.location.href='user/';
     return;
   }
+  refreshCaptcha();
   // Allow Enter key on login fields
-  ['l-user','l-pass'].forEach(id=>{
+  ['l-user','l-pass','l-captcha'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
   });
