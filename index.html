@@ -79,7 +79,7 @@
 
 <div id="modal-root"></div>
 
-<script src="js/json-db.js"></script>
+<script src="js/api.js"></script>
 <script src="js/core.js"></script>
 <script src="js/user.js"></script>
 <script src="js/login-history.js"></script>
@@ -133,7 +133,7 @@ function doSignup(){
 async function init(){
   await bootstrap();
   // If already logged in, redirect to the appropriate portal
-  const sess=Auth.restore();
+  const sess=await Auth.restore();
   if(sess){
     if(sess.role==='superadmin') window.location.href='superadmin/';
     else if(sess.role==='admin') window.location.href='admin/';
