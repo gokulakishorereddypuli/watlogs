@@ -183,7 +183,8 @@ const Auth = {
 /* ════════════════════════════════════════════════════
    BOOTSTRAP  – seed default data if first run
 ════════════════════════════════════════════════════ */
-function bootstrap(){
+async function bootstrap(){
+  await JsonDB.init();
   const adminExists=(window.UserStore&&UserStore.findByUsername)?UserStore.findByUsername('superadmin'):DB.findOne(T.users,u=>u.username==='superadmin');
   if(!adminExists){
     const admin={id:'superadmin_root',username:'superadmin',

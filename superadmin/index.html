@@ -34,6 +34,7 @@
 
 <div id="modal-root"></div>
 
+<script src="../js/json-db.js"></script>
 <script src="../js/core.js"></script>
 <script src="../js/user.js"></script>
 <script src="../js/login-history.js"></script>
@@ -42,8 +43,8 @@
 'use strict';
 window.AUTH_PATH = '../';
 
-function init(){
-  bootstrap();
+async function init(){
+  await bootstrap();
   const sess = Auth.restore();
   if(!sess || sess.role !== 'superadmin'){
     window.location.href = window.AUTH_PATH;

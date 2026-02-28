@@ -79,6 +79,7 @@
 
 <div id="modal-root"></div>
 
+<script src="js/json-db.js"></script>
 <script src="js/core.js"></script>
 <script src="js/user.js"></script>
 <script src="js/login-history.js"></script>
@@ -129,8 +130,8 @@ function doSignup(){
   showAuthAlert('Account created successfully! You can now sign in.','success');
 }
 
-function init(){
-  bootstrap();
+async function init(){
+  await bootstrap();
   // If already logged in, redirect to the appropriate portal
   const sess=Auth.restore();
   if(sess){
