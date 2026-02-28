@@ -1,0 +1,9 @@
+/* User Portal Theme – Teal / Green */
+:root{
+  --primary:#0d9488;--primary-dk:#0f766e;
+  --sidebar:#134e4a;--sidebar-txt:#99f6e4;
+  --bg:#f0fdfa;
+}
+.form-control:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+#auth-view{background:linear-gradient(135deg,#0d9488,#065f46)}
+.auth-logo h1{color:var(--primary)}
