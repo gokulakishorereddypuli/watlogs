@@ -25,11 +25,14 @@
     <div id="login-form">
       <div class="form-group">
         <label>Login As</label>
-        <select class="form-control" id="l-role">
+        <select class="form-control" id="l-role" onchange="onRoleChange(this.value)">
           <option value="user">User</option>
           <option value="admin">Admin</option>
           <option value="superadmin">Super Admin (Master Admin)</option>
         </select>
+      </div>
+      <div id="superadmin-hint" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:#166534;">
+        🔑 Default credentials — Username: <strong>superadmin</strong> &nbsp;|&nbsp; Password: <strong>superadmin</strong>
       </div>
       <div class="form-group">
         <label>Username</label>
@@ -87,6 +90,12 @@
 
 function showAuthAlert(msg, type='error'){
   document.getElementById('auth-alert').innerHTML=`<div class="alert alert-${type}">${U.esc(msg)}</div>`;
+}
+
+function onRoleChange(role){
+  document.getElementById('superadmin-hint').style.display=role==='superadmin'?'block':'none';
+  const userInput=document.getElementById('l-user');
+  if(role==='superadmin'&&!userInput.value) userInput.value='superadmin';
 }
 
 function switchTab(tab){
