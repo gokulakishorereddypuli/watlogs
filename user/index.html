@@ -42,8 +42,8 @@
 'use strict';
 window.AUTH_PATH = '../';
 
-function init(){
-  bootstrap();
+async function init(){
+  await bootstrap();
   const sess = Auth.restore();
   if(!sess || sess.role !== 'user'){
     window.location.href = window.AUTH_PATH;

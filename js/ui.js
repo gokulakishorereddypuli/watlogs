@@ -8,24 +8,22 @@ const NAV = {
     {v:'dashboard',icon:'🏠',label:'Dashboard'},
     {v:'checkins', icon:'⏱️',label:'Check-In / Check-Out'},
     {v:'profile',  icon:'👤',label:'My Profile'},
-    {v:'my-hist',  icon:'📜',label:'My Login History'},
   ],
   admin:[
     {v:'dashboard',icon:'🏠',label:'Dashboard'},
     {v:'checkins', icon:'⏱️',label:'Check-In / Check-Out'},
     {v:'profile',  icon:'👤',label:'My Profile'},
-    {v:'my-hist',  icon:'📜',label:'My Login History'},
     {section:'Admin'},
     {v:'users',    icon:'👥',label:'User Management'},
-    {v:'all-hist', icon:'📊',label:'Login History'},
+    {v:'pending-approvals',icon:'⏳',label:'Pending Approvals'},
   ],
   superadmin:[
     {v:'dashboard',   icon:'🏠',label:'Dashboard'},
     {v:'checkins',    icon:'⏱️',label:'Check-In / Check-Out'},
     {v:'profile',     icon:'👤',label:'My Profile'},
-    {v:'my-hist',     icon:'📜',label:'My Login History'},
     {section:'Admin'},
     {v:'users',       icon:'👥',label:'User Management'},
+    {v:'pending-approvals',icon:'⏳',label:'Pending Approvals'},
     {v:'all-hist',    icon:'📊',label:'Login History'},
     {section:'Super Admin'},
     {v:'bulk-import', icon:'📥',label:'Bulk User Import'},
@@ -95,6 +93,7 @@ function showView(v){
     case 'checkins':    mc.innerHTML=vCheckins(); startTimer(); break;
     case 'my-hist':     mc.innerHTML=vMyHist(); break;
     case 'users':       mc.innerHTML=vUsers(); break;
+    case 'pending-approvals': mc.innerHTML=vPendingApprovals(); break;
     case 'all-hist':    mc.innerHTML=vAllHist(); break;
     case 'bulk-import': mc.innerHTML=vBulkImport(); break;
     case 'create-admin':mc.innerHTML=vCreateAdmin(); break;
@@ -105,6 +104,7 @@ function showView(v){
 }
 
 function loadApp(){
+  autoCheckoutPrevDays();
   const lkp=DB.all(T.lkp);
   const appName=lkp.appName||'WatLogs';
   const role=Auth.s.role;
@@ -136,10 +136,10 @@ function sc(icon,label,val,color='var(--text)',raw=false){
 function vDashboard(){
   const {s}=Auth, role=s.role;
   const users=DB.all(T.users), hist=DB.all(T.hist), ci=DB.all(T.ci);
-  const today=new Date().toDateString();
+  const today=U.today();
   const myCI=ci.filter(c=>c.userId===s.userId);
-  const myH=hist.filter(h=>h.userId===s.userId);
   const todayCI=myCI.find(c=>new Date(c.checkinTime).toDateString()===today);
+  const pending=users.filter(u=>u.status==='pending');
 
   let statsHtml='';
   if(role==='superadmin'){
@@ -150,37 +150,51 @@ function vDashboard(){
       ${sc('🔒','Frozen',users.filter(u=>u.status==='frozen').length,'var(--info)')}
       ${sc('🛡️','Admins',users.filter(u=>u.role==='admin').length,'var(--warning)')}
       ${sc('📊','Today Logins',todayLogins)}
-      ${sc('📁','Total Records',hist.length+ci.length)}
+      ${sc('⏳','Pending Approvals',pending.length,'var(--warning)')}
     </div>`;
   } else if(role==='admin'){
     const regUsers=users.filter(u=>u.role==='user');
     statsHtml=`<div class="stats-grid">
-      ${sc('👥','Total Users',regUsers.length,'var(--primary)')}
+      ${sc('👥','Total Users',regUsers.filter(u=>u.status!=='pending').length,'var(--primary)')}
       ${sc('✅','Active',regUsers.filter(u=>u.status==='active').length,'var(--success)')}
       ${sc('🔒','Frozen',regUsers.filter(u=>u.status==='frozen').length,'var(--info)')}
-      ${sc('📊','Today Logins',hist.filter(h=>new Date(h.loginTime).toDateString()===today).length)}
+      ${sc('⏳','Pending Approvals',pending.length,'var(--warning)')}
     </div>`;
   } else {
     const totalMins=myCI.reduce((s,c)=>s+(c.duration||0),0);
     const todayMins=todayCI?(todayCI.duration||Math.round((new Date()-new Date(todayCI.checkinTime))/60000)):0;
+    const checkedOutToday=todayCI&&todayCI.checkoutTime;
     statsHtml=`<div class="stats-grid">
       ${sc('🕐','Today',U.fmtDur(todayMins),'var(--primary)',true)}
-      ${sc('📅','Total Logins',myH.length)}
       ${sc('⏱️','Total Hours',U.fmtDur(totalMins),'var(--success)',true)}
       ${sc('📋','CI Records',myCI.length)}
+      ${sc('📅','Today Status',checkedOutToday?'Checked Out':todayCI?'Checked In':'Not Yet','var(--text)',true)}
     </div>`;
   }
-  const recent=(role==='user'?myH:hist).sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)).slice(0,5);
-  const rows=recent.length?recent.map(h=>{
-    const dur=h.logoutTime?Math.round((new Date(h.logoutTime)-new Date(h.loginTime))/60000):null;
-    return `<tr>
-      ${role!=='user'?`<td><strong>${U.esc(h.username)}</strong></td>`:''}
-      <td>${U.fmtDT(h.loginTime)}</td><td>${U.fmtDT(h.logoutTime)}</td>
-      <td>${dur!==null?U.fmtDur(dur):'—'}</td>
-      <td><code>${U.esc(h.ipAddress||'—')}</code></td>
-      <td><span class="badge ${h.status==='logged_in'?'b-in':'b-out'}">${h.status==='logged_in'?'● Active':'● Ended'}</span></td>
-    </tr>`;
-  }).join(''):`<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No records yet</td></tr>`;
+
+  let recentHtml='';
+  if(role==='superadmin'){
+    const recent=hist.sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)).slice(0,5);
+    const rows=recent.length?recent.map(h=>{
+      const dur=h.logoutTime?Math.round((new Date(h.logoutTime)-new Date(h.loginTime))/60000):null;
+      return `<tr>
+        <td><strong>${U.esc(h.username)}</strong></td>
+        <td>${U.fmtDT(h.loginTime)}</td><td>${U.fmtDT(h.logoutTime)}</td>
+        <td>${dur!==null?U.fmtDur(dur):'—'}</td>
+        <td><code>${U.esc(h.ipAddress||'—')}</code></td>
+        <td><span class="badge ${h.status==='logged_in'?'b-in':'b-out'}">${h.status==='logged_in'?'● Active':'● Ended'}</span></td>
+      </tr>`;
+    }).join(''):`<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No records yet</td></tr>`;
+    recentHtml=`<div class="card">
+      <div class="card-header">
+        <h3>Recent Login Activity</h3>
+        <button class="btn btn-sm btn-outline" onclick="showView('all-hist')">View All →</button>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr>
+        <th>User</th><th>Login</th><th>Logout</th><th>Duration</th><th>IP</th><th>Status</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  }
 
   return `<div class="page-header">
     <h2>👋 Welcome, ${U.esc(s.user.legalName||s.username)}!</h2>
@@ -188,16 +202,7 @@ function vDashboard(){
        · IP: <code>${U.esc(s.ipAddress||'—')}</code></p>
   </div>
   ${statsHtml}
-  <div class="card">
-    <div class="card-header">
-      <h3>Recent Login Activity</h3>
-      <button class="btn btn-sm btn-outline" onclick="showView('${role==='user'?'my-hist':'all-hist'}')">View All →</button>
-    </div>
-    <div class="tbl-wrap"><table><thead><tr>
-      ${role!=='user'?'<th>User</th>':''}
-      <th>Login</th><th>Logout</th><th>Duration</th><th>IP</th><th>Status</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
-  </div>`;
+  ${recentHtml}`;
 }
 
 /* ════════════════════════════════════════════════════
@@ -205,17 +210,26 @@ function vDashboard(){
 ════════════════════════════════════════════════════ */
 function vProfile(){
   const u=Auth.s.user;
-  const hist=DB.find(T.hist,h=>h.userId===u.id).sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)).slice(0,15);
-  const rows=hist.length?hist.map((h,i)=>{
-    const dur=h.logoutTime?Math.round((new Date(h.logoutTime)-new Date(h.loginTime))/60000):null;
-    return `<tr>
-      <td class="text-muted">${hist.length-i}</td>
-      <td>${U.fmtDT(h.loginTime)}</td><td>${U.fmtDT(h.logoutTime)}</td>
-      <td>${dur!==null?U.fmtDur(dur):'—'}</td>
-      <td><code>${U.esc(h.ipAddress||'—')}</code></td>
-      <td><span class="badge ${h.status==='logged_in'?'b-in':'b-out'}">${h.status==='logged_in'?'● Active':'● Ended'}</span></td>
-    </tr>`;
-  }).join(''):`<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">No history</td></tr>`;
+  const role=Auth.s.role;
+  const histHtml=role==='superadmin'?(()=>{
+    const hist=DB.find(T.hist,h=>h.userId===u.id).sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)).slice(0,15);
+    const rows=hist.length?hist.map((h,i)=>{
+      const dur=h.logoutTime?Math.round((new Date(h.logoutTime)-new Date(h.loginTime))/60000):null;
+      return `<tr>
+        <td class="text-muted">${hist.length-i}</td>
+        <td>${U.fmtDT(h.loginTime)}</td><td>${U.fmtDT(h.logoutTime)}</td>
+        <td>${dur!==null?U.fmtDur(dur):'—'}</td>
+        <td><code>${U.esc(h.ipAddress||'—')}</code></td>
+        <td><span class="badge ${h.status==='logged_in'?'b-in':'b-out'}">${h.status==='logged_in'?'● Active':'● Ended'}</span></td>
+      </tr>`;
+    }).join(''):`<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">No history</td></tr>`;
+    return `<div class="card">
+      <div class="card-header"><h3>📍 Last Login History</h3></div>
+      <div class="tbl-wrap"><table><thead><tr>
+        <th>#</th><th>Login</th><th>Logout</th><th>Duration</th><th>IP</th><th>Status</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  })():'';
 
   return `<div class="page-header"><h2>👤 My Profile</h2><p>Manage your personal information and security</p></div>
   <div id="prof-alert"></div>
@@ -246,12 +260,7 @@ function vProfile(){
     </div>
     <button class="btn btn-warning" onclick="changePassword()">🔑 Update Password</button>
   </div>
-  <div class="card">
-    <div class="card-header"><h3>📍 Last Login History</h3></div>
-    <div class="tbl-wrap"><table><thead><tr>
-      <th>#</th><th>Login</th><th>Logout</th><th>Duration</th><th>IP</th><th>Status</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
-  </div>`;
+  ${histHtml}`;
 }
 
 /* ════════════════════════════════════════════════════
@@ -259,18 +268,21 @@ function vProfile(){
 ════════════════════════════════════════════════════ */
 function vCheckins(){
   const uid=Auth.s.userId;
+  const today=U.today();
   const active=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
+  const todayDone=!active&&DB.findOne(T.ci,c=>c.userId===uid&&new Date(c.checkinTime).toDateString()===today&&c.checkoutTime);
   const minH=DB.all(T.lkp).minLoginHours||10, minM=minH*60;
   const recs=DB.find(T.ci,c=>c.userId===uid).sort((a,b)=>new Date(b.checkinTime)-new Date(a.checkinTime));
   const rows=recs.length?recs.map(c=>{
     const dur=c.duration??( c.checkoutTime?Math.round((new Date(c.checkoutTime)-new Date(c.checkinTime))/60000):null );
-    const isShort=dur!==null&&dur<minM, isActive=!c.checkoutTime;
-    return `<tr>
+    const isAuto=c.autoCheckout||c.flagged, isShort=dur!==null&&dur<minM, isActive=!c.checkoutTime;
+    const rowStyle=isAuto?'style="background:rgba(239,68,68,0.08)"':'';
+    return `<tr ${rowStyle}>
       <td>${U.fmtD(c.checkinTime)}</td>
       <td>${U.fmtDT(c.checkinTime)}</td>
       <td>${c.checkoutTime?U.fmtDT(c.checkoutTime):'<span class="badge b-in">● Active</span>'}</td>
       <td>${dur!==null?U.fmtDur(dur):'—'}</td>
-      <td>${isActive?'<span class="badge b-current">Active</span>':isShort?'<span class="badge b-short">Short</span>':'<span class="badge b-ok">Complete</span>'}</td>
+      <td>${isAuto?'<span class="badge b-flag">🚩 Auto Checkout</span>':isActive?'<span class="badge b-current">Active</span>':isShort?'<span class="badge b-short">Short</span>':'<span class="badge b-ok">Complete</span>'}</td>
     </tr>`;
   }).join(''):`<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No records yet</td></tr>`;
 
@@ -290,7 +302,9 @@ function vCheckins(){
           ⚠️ You haven't reached the minimum ${minH}-hour threshold yet. You may still check out.
         </div>
         <button class="btn btn-danger" onclick="doCheckout()">🚪 Check Out</button>`
-      :`<button class="btn btn-success" onclick="doCheckin()">✅ Check In</button>`}
+      :todayDone
+        ?`<div class="alert alert-warning">✅ You have already completed your check-in for today. You can check in again tomorrow.</div>`
+        :`<button class="btn btn-success" onclick="doCheckin()">✅ Check In</button>`}
   </div>
   <div class="card">
     <div class="card-header"><h3>📋 Attendance History</h3></div>
@@ -345,8 +359,8 @@ function vMyHist(){
 function vUsers(){
   const role=Auth.s.role;
   const users=DB.all(T.users).filter(u=>{
-    if(role==='admin') return u.role!=='superadmin'&&u.id!==Auth.s.userId;
-    return u.id!==Auth.s.userId;
+    if(role==='admin') return u.role!=='superadmin'&&u.id!==Auth.s.userId&&u.status!=='pending';
+    return u.id!==Auth.s.userId&&u.status!=='pending';
   }).sort((a,b)=>a.username.localeCompare(b.username));
 
   const rows=users.length?users.map(u=>`
@@ -362,7 +376,7 @@ function vUsers(){
         ${u.status==='active'
           ?`<button class="btn btn-sm btn-warning" onclick="toggleUser('${u.id}','freeze','${U.esc(u.username)}')">🔒 Freeze</button>`
           :`<button class="btn btn-sm btn-success" onclick="toggleUser('${u.id}','activate','${U.esc(u.username)}')">✅ Activate</button>`}
-        <button class="btn btn-sm btn-outline" onclick="viewUserHist('${u.id}','${U.esc(u.username)}')">📜 History</button>
+        ${role==='superadmin'?`<button class="btn btn-sm btn-outline" onclick="viewUserHist('${u.id}','${U.esc(u.username)}')">📜 History</button>`:''}
       </div></td>
     </tr>`).join('')
     :`<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">No users found</td></tr>`;
@@ -664,24 +678,28 @@ function saveProfile(){
   showAlert('prof-alert','Profile updated successfully!','success');
 }
 
-function changePassword(){
+async function changePassword(){
   const cur=document.getElementById('p-cpwd').value;
   const np=document.getElementById('p-npwd').value;
   const rp=document.getElementById('p-rpwd').value;
   if(!cur||!np||!rp){showAlert('prof-alert','Fill in all password fields.');return;}
-  if(!U.checkPwd(cur,Auth.s.user.password)){showAlert('prof-alert','Current password is incorrect.');return;}
+  if(!await U.checkPwd(cur,Auth.s.user.password)){showAlert('prof-alert','Current password is incorrect.');return;}
   if(np.length<6){showAlert('prof-alert','New password must be at least 6 characters.');return;}
   if(np!==rp){showAlert('prof-alert','New passwords do not match.');return;}
-  DB.update(T.users,Auth.s.userId,{password:U.hashPwd(np)});
+  DB.update(T.users,Auth.s.userId,{password:await U.hashPwd(np)});
   Auth.s.user=DB.findId(T.users,Auth.s.userId);
   ['p-cpwd','p-npwd','p-rpwd'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   showAlert('prof-alert','Password updated successfully!','success');
 }
 
 function doCheckin(){
-  const exists=DB.findOne(T.ci,c=>c.userId===Auth.s.userId&&!c.checkoutTime);
+  const uid=Auth.s.userId;
+  const today=U.today();
+  const exists=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
   if(exists){alert('You are already checked in.');return;}
-  DB.insert(T.ci,{userId:Auth.s.userId,username:Auth.s.username,checkinTime:U.now(),checkoutTime:null,duration:null});
+  const todayCI=DB.findOne(T.ci,c=>c.userId===uid&&new Date(c.checkinTime).toDateString()===today&&c.checkoutTime);
+  if(todayCI){alert('You have already completed check-in for today. Re-check-in is not allowed for the same day.');return;}
+  DB.insert(T.ci,{userId:uid,username:Auth.s.username,checkinTime:U.now(),checkoutTime:null,duration:null});
   showView('checkins');
 }
 
@@ -718,7 +736,7 @@ function toggleUser(uid,action,uname){
   },action==='freeze');
 }
 
-function doBulkImport(){
+async function doBulkImport(){
   const csv=document.getElementById('bulk-csv').value.trim();
   if(!csv){showAlert('bulk-alert','Please enter CSV data.');return;}
   const lines=csv.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -731,7 +749,7 @@ function doBulkImport(){
     const [legalName,username,email,contactInfo,password]=p;
     if(!username||!password){errs.push(`Line ${i+1}: Username and password required`);continue;}
     if(DB.findOne(T.users,u=>u.username.toLowerCase()===username.toLowerCase())){errs.push(`Line ${i+1}: Username "${username}" already exists`);continue;}
-    DB.insert(T.users,{username,password:U.hashPwd(password),role:'user',
+    DB.insert(T.users,{username,password:await U.hashPwd(password),role:'user',
       legalName,email,contactInfo,status:'active',createdBy:Auth.s.username,lastLogin:null,lastIp:null});
     ok++;
   }
@@ -749,7 +767,7 @@ function downloadTemplate(){
   const a=document.createElement('a');a.href=url;a.download='bulk_import_template.csv';a.click();URL.revokeObjectURL(url);
 }
 
-function doCreateAdmin(){
+async function doCreateAdmin(){
   const name=document.getElementById('na-name').value.trim();
   const user=document.getElementById('na-user').value.trim();
   const email=document.getElementById('na-email').value.trim();
@@ -760,11 +778,68 @@ function doCreateAdmin(){
   if(pass!==conf){showAlert('adm-alert','Passwords do not match.');return;}
   if(DB.findOne(T.users,u=>u.username.toLowerCase()===user.toLowerCase())){showAlert('adm-alert','Username already taken.');return;}
   if(email&&DB.findOne(T.users,u=>u.email.toLowerCase()===email.toLowerCase())){showAlert('adm-alert','Email already registered.');return;}
-  DB.insert(T.users,{username:user,password:U.hashPwd(pass),role:'admin',
+  DB.insert(T.users,{username:user,password:await U.hashPwd(pass),role:'admin',
     legalName:name,email,contactInfo:contact,status:'active',createdBy:Auth.s.username,lastLogin:null,lastIp:null});
   showAlert('adm-alert',`Admin "${user}" created successfully!`,'success');
   ['na-name','na-user','na-email','na-contact','na-pass','na-conf'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   showView('create-admin');
+}
+
+/* ════════════════════════════════════════════════════
+   AUTO-CHECKOUT PREVIOUS DAYS
+════════════════════════════════════════════════════ */
+function autoCheckoutPrevDays(){
+  const today=U.today();
+  DB.find(T.ci,c=>!c.checkoutTime).forEach(ci=>{
+    if(new Date(ci.checkinTime).toDateString()!==today){
+      const eod=new Date(ci.checkinTime);
+      eod.setHours(23,59,59,0);
+      const duration=Math.round((eod-new Date(ci.checkinTime))/60000);
+      DB.update(T.ci,ci.id,{checkoutTime:eod.toISOString(),duration,autoCheckout:true,flagged:true});
+    }
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   VIEW: PENDING APPROVALS  (Admin+)
+════════════════════════════════════════════════════ */
+function vPendingApprovals(){
+  const pending=DB.find(T.users,u=>u.status==='pending');
+  const rows=pending.length?pending.map(u=>`
+    <tr>
+      <td><div class="fw-6">${U.esc(u.username)}</div><div class="text-sm text-muted">${U.esc(u.legalName||'')}</div></td>
+      <td>${U.esc(u.email||'—')}</td>
+      <td>${U.esc(u.contactInfo||'—')}</td>
+      <td class="text-sm">${U.fmtDT(u.createdAt)}</td>
+      <td><div class="flex gap-2">
+        <button class="btn btn-sm btn-success" onclick="approveUser('${u.id}','${U.esc(u.username)}')">✅ Approve</button>
+        <button class="btn btn-sm btn-danger" onclick="rejectUser('${u.id}','${U.esc(u.username)}')">❌ Reject</button>
+      </div></td>
+    </tr>`).join('')
+    :`<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No pending approvals</td></tr>`;
+  return `<div class="page-header"><h2>⏳ Pending Approvals</h2><p>Approve or reject new account requests</p></div>
+  <div id="pend-alert"></div>
+  <div class="card">
+    <div class="card-header"><h3>Pending Accounts (${pending.length})</h3></div>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th>User</th><th>Email</th><th>Contact</th><th>Requested</th><th>Actions</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+  </div>`;
+}
+
+function approveUser(uid,uname){
+  showConfirm('✅ Approve Account',`Approve account for "${uname}"? They will be able to login.`,()=>{
+    DB.update(T.users,uid,{status:'active'});
+    showView('pending-approvals');
+    showAlert('pend-alert',`Account "${uname}" has been approved.`,'success');
+  },false);
+}
+
+function rejectUser(uid,uname){
+  showConfirm('❌ Reject Account',`Reject and delete account for "${uname}"?`,()=>{
+    DB.del(T.users,uid);
+    showView('pending-approvals');
+  },true);
 }
 
 function saveLookup(){

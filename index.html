@@ -112,7 +112,7 @@ async function doLogin(){
   else window.location.href='user/';
 }
 
-function doSignup(){
+async function doSignup(){
   const legalName=document.getElementById('s-name').value.trim();
   const username=document.getElementById('s-user').value.trim();
   const email=document.getElementById('s-email').value.trim();
@@ -122,15 +122,15 @@ function doSignup(){
   if(!legalName||!username||!email||!pass){showAuthAlert('Please fill in all required fields (*).','error');return;}
   if(pass!==conf){showAuthAlert('Passwords do not match.','error');return;}
   if(pass.length<6){showAuthAlert('Password must be at least 6 characters.','error');return;}
-  const r=Auth.signup({legalName,username,email,contact,password:pass});
+  const r=await Auth.signup({legalName,username,email,contact,password:pass});
   if(!r.ok){showAuthAlert(r.err,'error');return;}
   switchTab('login');
   document.getElementById('l-user').value=username;
-  showAuthAlert('Account created successfully! You can now sign in.','success');
+  showAuthAlert('Account created! Your account is pending approval by an administrator. You will be able to sign in once approved.','success');
 }
 
-function init(){
-  bootstrap();
+async function init(){
+  await bootstrap();
   // If already logged in, redirect to the appropriate portal
   const sess=Auth.restore();
   if(sess){

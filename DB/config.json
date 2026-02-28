@@ -1,1 +1,6 @@
-
+{
+  "minLoginHours": 10,
+  "ipRestrictionEnabled": false,
+  "allowedIPs": [],
+  "appName": "WatLogs"
+}
