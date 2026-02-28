@@ -157,6 +157,22 @@
     .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
       border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
     @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ── Captcha ── */
+    .captcha-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+    .captcha-canvas{border:1.5px solid var(--border);border-radius:8px;cursor:pointer;
+      background:#f8fafc;flex-shrink:0}
+    .captcha-refresh{background:none;border:none;font-size:18px;cursor:pointer;
+      color:var(--muted);padding:4px;border-radius:6px;transition:color .2s}
+    .captcha-refresh:hover{color:var(--primary)}
+
+    /* ── Setup / ORDS config view ── */
+    #setup-view{min-height:100vh;display:none;align-items:center;justify-content:center;
+      background:linear-gradient(135deg,#667eea,#764ba2)}
+
+    /* ── Pending badge ── */
+    .b-pending{background:#fef9c3;color:#a16207}
+    .b-approve{background:#dcfce7;color:#16a34a}
   </style>
 </head>
 <body>
@@ -192,6 +208,16 @@
         <label>Password</label>
         <input type="password" class="form-control" id="l-pass" placeholder="Enter password" autocomplete="current-password">
       </div>
+      <div class="form-group">
+        <label>Captcha Verification</label>
+        <div class="captcha-row">
+          <canvas id="cap-canvas-login" class="captcha-canvas" width="160" height="44"
+            title="Click to refresh captcha" onclick="Captcha.generate('login')"></canvas>
+          <button type="button" class="captcha-refresh" onclick="Captcha.generate('login')" title="Refresh captcha">🔄</button>
+          <input type="text" class="form-control" id="cap-input-login"
+            placeholder="Enter code" autocomplete="off" maxlength="6" style="flex:1">
+        </div>
+      </div>
       <button class="btn btn-primary btn-full" id="login-btn" onclick="doLogin()">Sign In</button>
     </div>
 
@@ -225,8 +251,41 @@
           <input type="password" class="form-control" id="s-conf" placeholder="Repeat password">
         </div>
       </div>
+      <div class="form-group">
+        <label>Captcha Verification</label>
+        <div class="captcha-row">
+          <canvas id="cap-canvas-signup" class="captcha-canvas" width="160" height="44"
+            title="Click to refresh captcha" onclick="Captcha.generate('signup')"></canvas>
+          <button type="button" class="captcha-refresh" onclick="Captcha.generate('signup')" title="Refresh captcha">🔄</button>
+          <input type="text" class="form-control" id="cap-input-signup"
+            placeholder="Enter code" autocomplete="off" maxlength="6" style="flex:1">
+        </div>
+      </div>
       <button class="btn btn-primary btn-full" onclick="doSignup()">Create Account</button>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════ ORDS SETUP VIEW ══════════════════ -->
+<div id="setup-view">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <h1>🕐 WatLogs</h1>
+      <p>Initial Setup</p>
+    </div>
+    <div class="alert alert-info" style="margin-bottom:18px">
+      <span>ℹ️</span>&nbsp;Configure the Oracle APEX ORDS base URL to connect to your database.
+    </div>
+    <div id="setup-alert"></div>
+    <div class="form-group">
+      <label>ORDS Base URL *</label>
+      <input type="text" class="form-control" id="setup-ords-url"
+        placeholder="https://your-apex-host/ords/watlogs">
+      <p class="text-sm text-muted mt-2">
+        Example: <code>https://apex.oracle.com/pls/apex/watlogs</code>
+      </p>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doSetupOrds()">🚀 Save &amp; Continue</button>
   </div>
 </div>
 
@@ -261,30 +320,29 @@
 'use strict';
 
 /* ════════════════════════════════════════════════════
-   CONSTANTS
+   CONFIGURATION  (ORDS base URL stored in localStorage)
 ════════════════════════════════════════════════════ */
-const PFX = 'wl_';
-const T = { users:'users', sessions:'sessions', hist:'login_history', ci:'checkins', lkp:'lookup' };
+const CFG = {
+  getBase: ()  => (localStorage.getItem('wl_ords_url') || '').replace(/\/$/, ''),
+  setBase: url => localStorage.setItem('wl_ords_url', url.replace(/\/$/, ''))
+};
 
 /* ════════════════════════════════════════════════════
    UTILITIES
 ════════════════════════════════════════════════════ */
 const U = {
-  uid: () => 'id' + Date.now() + Math.random().toString(36).slice(2,8),
-  now: () => new Date().toISOString(),
+  now:   () => new Date().toISOString(),
   fmtDT: iso => iso ? new Date(iso).toLocaleString('en-US',{year:'numeric',month:'short',
     day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—',
-  fmtD: iso => iso ? new Date(iso).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : '—',
+  fmtD:  iso => iso ? new Date(iso).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : '—',
   fmtDur: m => {
-    if(m===null||m===undefined) return '—';
-    return Math.floor(m/60)+'h '+(m%60)+'m';
+    if(m===null||m===undefined||m==='') return '—';
+    const n=Number(m); return isNaN(n)?'—':Math.floor(n/60)+'h '+(n%60)+'m';
   },
   fmtTimer: s => {
     const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
   },
-  hashPwd: p => btoa(encodeURIComponent(p+'__wl2024__')),
-  checkPwd: (p,h) => U.hashPwd(p)===h,
   initials: n => {
     if(!n) return '?';
     const p=n.trim().split(/\s+/);
@@ -294,30 +352,88 @@ const U = {
 };
 
 /* ════════════════════════════════════════════════════
-   DATABASE  (localStorage)
+   API  (ORDS REST Client)
 ════════════════════════════════════════════════════ */
-const DB = {
-  key: t => PFX+t,
-  all: t => { try{ const r=localStorage.getItem(DB.key(t)); return t===T.lkp?(r?JSON.parse(r):{}):r?JSON.parse(r):[]; }catch{ return t===T.lkp?{}:[]; } },
-  save: (t,d) => localStorage.setItem(DB.key(t),JSON.stringify(d)),
-  findId: (t,id) => DB.all(t).find(r=>r.id===id)||null,
-  findOne: (t,fn) => DB.all(t).find(fn)||null,
-  find: (t,fn) => fn?DB.all(t).filter(fn):DB.all(t),
-  insert: (t,rec) => {
-    const rows=DB.all(t);
-    if(!rec.id) rec.id=U.uid();
-    if(!rec.createdAt) rec.createdAt=U.now();
-    rows.push(rec); DB.save(t,rows); return rec;
+const API = {
+  async req(method, path, body){
+    const base = CFG.getBase();
+    if(!base) throw new Error('ORDS_NOT_CONFIGURED');
+    const opts = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(Auth.s?.id ? {'X-Session-Id': Auth.s.id} : {})
+      }
+    };
+    if(body !== undefined) opts.body = JSON.stringify(body);
+    const res  = await fetch(base + path, opts);
+    const ct   = res.headers.get('content-type') || '';
+    const json = ct.includes('json') ? await res.json() : {};
+    if(!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`);
+    return json;
   },
-  update: (t,id,patch) => {
-    const rows=DB.all(t), i=rows.findIndex(r=>r.id===id);
-    if(i<0) return null;
-    rows[i]={...rows[i],...patch,updatedAt:U.now()};
-    DB.save(t,rows); return rows[i];
-  },
-  del: (t,id) => DB.save(t,DB.all(t).filter(r=>r.id!==id)),
-  setLkp: patch => DB.save(T.lkp,{...DB.all(T.lkp),...patch})
+  get:  path       => API.req('GET',    path),
+  post: (path, b)  => API.req('POST',   path, b),
+  put:  (path, b)  => API.req('PUT',    path, b),
+  del:  path       => API.req('DELETE', path)
 };
+
+/* ════════════════════════════════════════════════════
+   CAPTCHA  (canvas-based visual captcha + server-side token)
+════════════════════════════════════════════════════ */
+const Captcha = {
+  _a: {},      // client-side canvas answers
+  _tokens: {}, // server-side captcha tokens
+
+  async generate(fid){
+    const canvas = document.getElementById('cap-canvas-' + fid);
+    if(!canvas) return;
+    const ctx  = canvas.getContext('2d');
+    const CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let code = '';
+    for(let i=0;i<5;i++) code += CHARS[Math.floor(Math.random()*CHARS.length)];
+    Captcha._a[fid] = code;
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#f8fafc'; ctx.fillRect(0,0,W,H);
+    // noise lines
+    for(let i=0;i<6;i++){
+      ctx.strokeStyle=`rgba(${rnd(100,200)},${rnd(100,200)},${rnd(100,200)},.4)`;
+      ctx.lineWidth=1; ctx.beginPath();
+      ctx.moveTo(rnd(0,W),rnd(0,H)); ctx.lineTo(rnd(0,W),rnd(0,H)); ctx.stroke();
+    }
+    // characters
+    for(let i=0;i<code.length;i++){
+      ctx.save();
+      ctx.font=`bold ${rnd(19,26)}px 'Courier New',monospace`;
+      ctx.fillStyle=`rgb(${rnd(10,80)},${rnd(10,100)},${rnd(100,190)})`;
+      ctx.translate(12+i*28, rnd(22,32)); ctx.rotate((Math.random()-.5)*.65);
+      ctx.fillText(code[i],0,0); ctx.restore();
+    }
+    // noise dots
+    for(let i=0;i<40;i++){
+      ctx.fillStyle=`rgba(${rnd(0,255)},${rnd(0,255)},${rnd(0,255)},.22)`;
+      ctx.beginPath(); ctx.arc(rnd(0,W),rnd(0,H),rnd(1,2),0,Math.PI*2); ctx.fill();
+    }
+    const inp = document.getElementById('cap-input-'+fid);
+    if(inp) inp.value = '';
+    // Also fetch a server-side captcha token in the background for dual-layer verification
+    Captcha._tokens[fid] = null;
+    try{
+      const r = await API.get('/captcha');
+      if(r.ok && r.data) Captcha._tokens[fid] = r.data.token;
+    }catch(_){ /* server token optional; canvas check still applies */ }
+  },
+
+  verify(fid, input){
+    // Client-side canvas answer check
+    return (input||'').toLowerCase() === (Captcha._a[fid]||'').toLowerCase();
+  },
+
+  getToken(fid){ return Captcha._tokens[fid] || null; }
+};
+function rnd(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 
 /* ════════════════════════════════════════════════════
    IP DETECTION  (WebRTC, no external call)
@@ -344,96 +460,58 @@ const IP = {
 };
 
 /* ════════════════════════════════════════════════════
-   AUTH
+   AUTH  (uses ORDS API)
 ════════════════════════════════════════════════════ */
 const Auth = {
-  s: null,   // current session object (with .user)
+  s: null,   // current session object (includes .user)
 
-  async login(username, password, role){
-    const ip = await IP.get();
-    const lkp = DB.all(T.lkp);
-
-    // IP restriction
-    if(lkp.ipRestrictionEnabled && (lkp.allowedIPs||[]).length){
-      const ipParts=ip.split('.');
-      const ok=(lkp.allowedIPs).some(pat=>{
-        const base=pat.trim().split('/')[0]; // strip CIDR notation
-        const baseParts=base.split('.');
-        // Each octet in the pattern must match the corresponding IP octet exactly
-        return baseParts.every((part,i)=>part===ipParts[i]);
+  async login(username, password, role, captchaAnswer, captchaToken){
+    try{
+      const ip = await IP.get();
+      const data = await API.post('/auth/login',{
+        username, password, role,
+        captchaAnswer, captchaToken: captchaToken || null,
+        ip
       });
-      if(!ok) return {ok:false,err:`Your IP (${ip}) is not on the allowed list.`};
-    }
-
-    const user=DB.findOne(T.users,u=>u.username.toLowerCase()===username.toLowerCase());
-    if(!user) return {ok:false,err:'Invalid username or password.'};
-    if(!U.checkPwd(password,user.password)) return {ok:false,err:'Invalid username or password.'};
-    if(user.status==='frozen') return {ok:false,err:'Account is frozen. Contact an administrator.'};
-    if(role && user.role!==role)
-      return {ok:false,err:`This account has role "${user.role}". Please select the correct role.`};
-
-    // One session per user
-    const existing=DB.findOne(T.sessions,s=>s.userId===user.id&&s.active);
-    if(existing) return {ok:false,err:'This account already has an active session. Logout from the other device first.'};
-
-    const sess=DB.insert(T.sessions,{userId:user.id,username:user.username,role:user.role,
-      loginTime:U.now(),ipAddress:ip,active:true,logoutTime:null});
-    DB.insert(T.hist,{userId:user.id,username:user.username,role:user.role,
-      loginTime:U.now(),logoutTime:null,ipAddress:ip,status:'logged_in',sessionId:sess.id});
-    DB.update(T.users,user.id,{lastLogin:U.now(),lastIp:ip});
-    sessionStorage.setItem('wl_sid',sess.id);
-    Auth.s={...sess,user};
-    return {ok:true};
+      Auth.s = data.data.session;
+      sessionStorage.setItem('wl_sid', Auth.s.id);
+      return {ok:true};
+    }catch(e){ return {ok:false, err:e.message}; }
   },
 
-  logout(){
-    if(!Auth.s)return;
-    const now=U.now(), sid=Auth.s.id, uid=Auth.s.userId;
-    DB.update(T.sessions,sid,{active:false,logoutTime:now});
-    const h=DB.findOne(T.hist,x=>x.sessionId===sid&&x.status==='logged_in');
-    if(h) DB.update(T.hist,h.id,{logoutTime:now,status:'logged_out'});
-    const ci=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
-    if(ci) DB.update(T.ci,ci.id,{checkoutTime:now,duration:Math.round((new Date()-new Date(ci.checkinTime))/60000)});
+  async logout(){
+    if(!Auth.s) return;
+    try{ await API.post('/auth/logout',{sessionId:Auth.s.id}); }catch(_){}
     sessionStorage.removeItem('wl_sid');
-    Auth.s=null;
+    Auth.s = null;
   },
 
-  restore(){
-    const sid=sessionStorage.getItem('wl_sid');
-    if(!sid)return null;
-    const sess=DB.findId(T.sessions,sid);
-    if(!sess||!sess.active){sessionStorage.removeItem('wl_sid');return null;}
-    const user=DB.findId(T.users,sess.userId);
-    Auth.s={...sess,user};
-    return Auth.s;
+  async restore(){
+    const sid = sessionStorage.getItem('wl_sid');
+    if(!sid) return null;
+    try{
+      const data = await API.get('/auth/me');
+      if(!data.ok) throw new Error('invalid');
+      Auth.s = data.data.session;
+      return Auth.s;
+    }catch(_){
+      sessionStorage.removeItem('wl_sid');
+      return null;
+    }
   },
 
-  signup(d){
-    if(DB.findOne(T.users,u=>u.username.toLowerCase()===d.username.toLowerCase()))
-      return {ok:false,err:'Username already taken.'};
-    if(d.email&&DB.findOne(T.users,u=>u.email.toLowerCase()===d.email.toLowerCase()))
-      return {ok:false,err:'Email already registered.'};
-    DB.insert(T.users,{username:d.username,password:U.hashPwd(d.password),role:'user',
-      legalName:d.legalName||'',email:d.email||'',contactInfo:d.contact||'',
-      status:'active',createdBy:'signup',lastLogin:null,lastIp:null});
-    return {ok:true};
+  async signup(d, captchaAnswer, captchaToken){
+    try{
+      const data = await API.post('/auth/signup',{
+        username:d.username, password:d.password,
+        legalName:d.legalName, email:d.email,
+        contact:d.contact,
+        captchaAnswer, captchaToken: captchaToken || null
+      });
+      return {ok:true, msg:data.data?.message||'Account created.'};
+    }catch(e){ return {ok:false, err:e.message}; }
   }
 };
-
-/* ════════════════════════════════════════════════════
-   BOOTSTRAP  – seed default data if first run
-════════════════════════════════════════════════════ */
-function bootstrap(){
-  if(!DB.findOne(T.users,u=>u.username==='superadmin')){
-    DB.insert(T.users,{id:'superadmin_root',username:'superadmin',
-      password:U.hashPwd('superadmin'),role:'superadmin',legalName:'Super Administrator',
-      email:'superadmin@watlogs.local',contactInfo:'',status:'active',
-      createdBy:'system',lastLogin:null,lastIp:null});
-  }
-  const lkp=DB.all(T.lkp);
-  if(!lkp.minLoginHours) DB.setLkp({minLoginHours:10,ipRestrictionEnabled:false,
-    allowedIPs:[],appName:'WatLogs'});
-}
 
 /* ════════════════════════════════════════════════════
    UI HELPERS
@@ -442,18 +520,18 @@ function showAlert(id,msg,type='error'){
   const el=document.getElementById(id);
   if(!el)return;
   el.innerHTML=`<div class="alert alert-${type}">${U.esc(msg)}</div>`;
-  setTimeout(()=>{ if(el) el.innerHTML=''; },5000);
+  setTimeout(()=>{ if(el) el.innerHTML=''; },6000);
 }
 function showAuthAlert(msg,type='error'){
   document.getElementById('auth-alert').innerHTML=`<div class="alert alert-${type}">${U.esc(msg)}</div>`;
 }
+let _confirmCb=null;
 function showConfirm(title,msg,onYes,danger=true){
   _confirmCb=onYes;
   document.getElementById('modal-root').innerHTML=`
     <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
       <div class="modal-box">
-        <h3>${U.esc(title)}</h3>
-        <p>${U.esc(msg)}</p>
+        <h3>${U.esc(title)}</h3><p>${U.esc(msg)}</p>
         <div class="modal-actions">
           <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
           <button class="btn ${danger?'btn-danger':'btn-primary'}" onclick="runConfirm()">Confirm</button>
@@ -469,39 +547,39 @@ function closeModal(){ document.getElementById('modal-root').innerHTML=''; _conf
 ════════════════════════════════════════════════════ */
 const NAV = {
   user:[
-    {v:'dashboard',icon:'🏠',label:'Dashboard'},
-    {v:'checkins', icon:'⏱️',label:'Check-In / Check-Out'},
-    {v:'profile',  icon:'👤',label:'My Profile'},
-    {v:'my-hist',  icon:'📜',label:'My Login History'},
+    {v:'dashboard',    icon:'🏠', label:'Dashboard'},
+    {v:'checkins',     icon:'⏱️', label:'Check-In / Check-Out'},
+    {v:'profile',      icon:'👤', label:'My Profile'},
+    {v:'my-hist',      icon:'📜', label:'My Login History'},
   ],
   admin:[
-    {v:'dashboard',icon:'🏠',label:'Dashboard'},
-    {v:'checkins', icon:'⏱️',label:'Check-In / Check-Out'},
-    {v:'profile',  icon:'👤',label:'My Profile'},
-    {v:'my-hist',  icon:'📜',label:'My Login History'},
+    {v:'dashboard',    icon:'🏠', label:'Dashboard'},
+    {v:'checkins',     icon:'⏱️', label:'Check-In / Check-Out'},
+    {v:'profile',      icon:'👤', label:'My Profile'},
+    {v:'my-hist',      icon:'📜', label:'My Login History'},
     {section:'Admin'},
-    {v:'users',    icon:'👥',label:'User Management'},
-    {v:'all-hist', icon:'📊',label:'Login History'},
+    {v:'users',        icon:'👥', label:'User Management'},
+    {v:'all-hist',     icon:'📊', label:'Login History'},
+    {v:'ords-settings',icon:'🔗', label:'ORDS Settings'},
   ],
   superadmin:[
-    {v:'dashboard',   icon:'🏠',label:'Dashboard'},
-    {v:'checkins',    icon:'⏱️',label:'Check-In / Check-Out'},
-    {v:'profile',     icon:'👤',label:'My Profile'},
-    {v:'my-hist',     icon:'📜',label:'My Login History'},
+    {v:'dashboard',    icon:'🏠', label:'Dashboard'},
+    {v:'checkins',     icon:'⏱️', label:'Check-In / Check-Out'},
+    {v:'profile',      icon:'👤', label:'My Profile'},
+    {v:'my-hist',      icon:'📜', label:'My Login History'},
     {section:'Admin'},
-    {v:'users',       icon:'👥',label:'User Management'},
-    {v:'all-hist',    icon:'📊',label:'Login History'},
+    {v:'users',        icon:'👥', label:'User Management'},
+    {v:'all-hist',     icon:'📊', label:'Login History'},
     {section:'Super Admin'},
-    {v:'bulk-import', icon:'📥',label:'Bulk User Import'},
-    {v:'create-admin',icon:'🛡️',label:'Create Admin'},
-    {v:'json-viewer', icon:'📁',label:'JSON DB Viewer'},
-    {v:'lookup',      icon:'⚙️',label:'System Settings'},
+    {v:'bulk-import',  icon:'📥', label:'Bulk User Import'},
+    {v:'create-admin', icon:'🛡️', label:'Create Admin'},
+    {v:'json-viewer',  icon:'📁', label:'DB Viewer'},
+    {v:'lookup',       icon:'⚙️', label:'System Settings'},
   ]
 };
 
 let _timerInterval=null;
 let _currentView=null;
-let _confirmCb=null;
 
 function buildSidebar(){
   const role=Auth.s.role;
@@ -519,54 +597,67 @@ function buildSidebar(){
   }).join('');
 }
 
-function showView(v){
+async function showView(v){
   _currentView=v;
   if(_timerInterval){clearInterval(_timerInterval);_timerInterval=null;}
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===v));
   const mc=document.getElementById('main-content');
-  switch(v){
-    case 'dashboard':   mc.innerHTML=vDashboard(); break;
-    case 'profile':     mc.innerHTML=vProfile(); break;
-    case 'checkins':    mc.innerHTML=vCheckins(); startTimer(); break;
-    case 'my-hist':     mc.innerHTML=vMyHist(); break;
-    case 'users':       mc.innerHTML=vUsers(); break;
-    case 'all-hist':    mc.innerHTML=vAllHist(); break;
-    case 'bulk-import': mc.innerHTML=vBulkImport(); break;
-    case 'create-admin':mc.innerHTML=vCreateAdmin(); break;
-    case 'json-viewer': mc.innerHTML=vJsonViewer('users'); break;
-    case 'lookup':      mc.innerHTML=vLookup(); break;
-    default:            mc.innerHTML=vDashboard();
+  mc.innerHTML='<div class="empty"><div class="spinner" style="width:32px;height:32px;border-color:var(--border);border-top-color:var(--primary)"></div><p class="mt-3 text-muted">Loading…</p></div>';
+  try{
+    switch(v){
+      case 'dashboard':    mc.innerHTML=await vDashboard();    break;
+      case 'profile':      mc.innerHTML=await vProfile();      break;
+      case 'checkins':     mc.innerHTML=await vCheckins();     startTimer(); break;
+      case 'my-hist':      mc.innerHTML=await vMyHist();       break;
+      case 'users':        mc.innerHTML=await vUsers();        break;
+      case 'all-hist':     mc.innerHTML=await vAllHist();      break;
+      case 'bulk-import':  mc.innerHTML=vBulkImport();         break;
+      case 'create-admin': mc.innerHTML=vCreateAdmin();        break;
+      case 'json-viewer':  mc.innerHTML=await vJsonViewer();   break;
+      case 'lookup':       mc.innerHTML=await vLookup();       break;
+      case 'ords-settings':mc.innerHTML=vOrdsSettings();       break;
+      default:             mc.innerHTML=await vDashboard();
+    }
+  }catch(e){
+    mc.innerHTML=`<div class="page-header"><h2>Error</h2></div>
+      <div class="alert alert-error">⚠️ ${U.esc(e.message)}</div>`;
   }
 }
 
 /* ════════════════════════════════════════════════════
    VIEW: DASHBOARD
 ════════════════════════════════════════════════════ */
-function vDashboard(){
+async function vDashboard(){
   const {s}=Auth, role=s.role;
-  const users=DB.all(T.users), hist=DB.all(T.hist), ci=DB.all(T.ci);
+  const [usersR, histR, ciR] = await Promise.all([
+    role!=='user' ? API.get('/users') : Promise.resolve({ok:true,data:[]}),
+    role!=='user' ? API.get('/history') : Promise.resolve({ok:true,data:[]}),
+    API.get('/checkins/me')
+  ]);
+  const users=usersR.data||[], hist=histR.data||[], myCI=ciR.data||[];
+  const myHistR = await API.get('/history/me');
+  const myH = myHistR.data||[];
   const today=new Date().toDateString();
-  const myCI=ci.filter(c=>c.userId===s.userId);
-  const myH=hist.filter(h=>h.userId===s.userId);
   const todayCI=myCI.find(c=>new Date(c.checkinTime).toDateString()===today);
-
   let statsHtml='';
   if(role==='superadmin'){
     const todayLogins=hist.filter(h=>new Date(h.loginTime).toDateString()===today).length;
+    const pendingCnt=users.filter(u=>u.status==='pending').length;
     statsHtml=`<div class="stats-grid">
       ${sc('👥','Total Users',users.length,'var(--primary)')}
       ${sc('✅','Active',users.filter(u=>u.status==='active').length,'var(--success)')}
+      ${sc('⏳','Pending Approval',pendingCnt,'var(--warning)')}
       ${sc('🔒','Frozen',users.filter(u=>u.status==='frozen').length,'var(--info)')}
       ${sc('🛡️','Admins',users.filter(u=>u.role==='admin').length,'var(--warning)')}
       ${sc('📊','Today Logins',todayLogins)}
-      ${sc('📁','Total Records',hist.length+ci.length)}
     </div>`;
   } else if(role==='admin'){
     const regUsers=users.filter(u=>u.role==='user');
+    const pendingCnt=regUsers.filter(u=>u.status==='pending').length;
     statsHtml=`<div class="stats-grid">
       ${sc('👥','Total Users',regUsers.length,'var(--primary)')}
       ${sc('✅','Active',regUsers.filter(u=>u.status==='active').length,'var(--success)')}
-      ${sc('🔒','Frozen',regUsers.filter(u=>u.status==='frozen').length,'var(--info)')}
+      ${sc('⏳','Pending Approval',pendingCnt,'var(--warning)')}
       ${sc('📊','Today Logins',hist.filter(h=>new Date(h.loginTime).toDateString()===today).length)}
     </div>`;
   } else {
@@ -590,7 +681,6 @@ function vDashboard(){
       <td><span class="badge ${h.status==='logged_in'?'b-in':'b-out'}">${h.status==='logged_in'?'● Active':'● Ended'}</span></td>
     </tr>`;
   }).join(''):`<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No records yet</td></tr>`;
-
   return `<div class="page-header">
     <h2>👋 Welcome, ${U.esc(s.user.legalName||s.username)}!</h2>
     <p>${new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}
@@ -619,9 +709,10 @@ function sc(icon,label,val,color='var(--text)',raw=false){
 /* ════════════════════════════════════════════════════
    VIEW: PROFILE
 ════════════════════════════════════════════════════ */
-function vProfile(){
+async function vProfile(){
   const u=Auth.s.user;
-  const hist=DB.find(T.hist,h=>h.userId===u.id).sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)).slice(0,15);
+  const histR=await API.get('/history/me');
+  const hist=(histR.data||[]).slice(0,15);
   const rows=hist.length?hist.map((h,i)=>{
     const dur=h.logoutTime?Math.round((new Date(h.logoutTime)-new Date(h.loginTime))/60000):null;
     return `<tr>
@@ -632,7 +723,6 @@ function vProfile(){
       <td><span class="badge ${h.status==='logged_in'?'b-in':'b-out'}">${h.status==='logged_in'?'● Active':'● Ended'}</span></td>
     </tr>`;
   }).join(''):`<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">No history</td></tr>`;
-
   return `<div class="page-header"><h2>👤 My Profile</h2><p>Manage your personal information and security</p></div>
   <div id="prof-alert"></div>
   <div class="card">
@@ -673,13 +763,17 @@ function vProfile(){
 /* ════════════════════════════════════════════════════
    VIEW: CHECK-IN / CHECK-OUT
 ════════════════════════════════════════════════════ */
-function vCheckins(){
-  const uid=Auth.s.userId;
-  const active=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
-  const minH=DB.all(T.lkp).minLoginHours||10, minM=minH*60;
-  const recs=DB.find(T.ci,c=>c.userId===uid).sort((a,b)=>new Date(b.checkinTime)-new Date(a.checkinTime));
+async function vCheckins(){
+  const lkpR = await API.get('/lookup');
+  const lkp  = lkpR.data || {};
+  const minH = parseInt(lkp.min_login_hours||'10',10);
+  const minM = minH * 60;
+  const ciR  = await API.get('/checkins/me');
+  const recs = (ciR.data||[]);
+  const active = recs.find(c=>!c.checkoutTime);
   const rows=recs.length?recs.map(c=>{
-    const dur=c.duration??( c.checkoutTime?Math.round((new Date(c.checkoutTime)-new Date(c.checkinTime))/60000):null );
+    const dur=c.duration!==null&&c.duration!==undefined?c.duration:
+              (c.checkoutTime?Math.round((new Date(c.checkoutTime)-new Date(c.checkinTime))/60000):null);
     const isShort=dur!==null&&dur<minM, isActive=!c.checkoutTime;
     return `<tr>
       <td>${U.fmtD(c.checkinTime)}</td>
@@ -689,7 +783,6 @@ function vCheckins(){
       <td>${isActive?'<span class="badge b-current">Active</span>':isShort?'<span class="badge b-short">Short</span>':'<span class="badge b-ok">Complete</span>'}</td>
     </tr>`;
   }).join(''):`<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No records yet</td></tr>`;
-
   return `<div class="page-header"><h2>⏱️ Check-In / Check-Out</h2>
     <p>Track daily attendance. Minimum session: <strong>${minH} hours</strong></p></div>
   <div class="card">
@@ -705,7 +798,7 @@ function vCheckins(){
       ?`<div id="ci-warn" class="alert alert-warning" style="display:none">
           ⚠️ You haven't reached the minimum ${minH}-hour threshold yet. You may still check out.
         </div>
-        <button class="btn btn-danger" onclick="doCheckout()">🚪 Check Out</button>`
+        <button class="btn btn-danger" onclick="doCheckout('${active.id}',${minM},${minH})">🚪 Check Out</button>`
       :`<button class="btn btn-success" onclick="doCheckin()">✅ Check In</button>`}
   </div>
   <div class="card">
@@ -717,28 +810,34 @@ function vCheckins(){
 }
 
 function startTimer(){
-  const uid=Auth.s.userId;
-  const active=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
-  if(!active)return;
-  const minM=(DB.all(T.lkp).minLoginHours||10)*60;
-  function tick(){
-    const el=document.getElementById('ci-timer');
-    const w=document.getElementById('ci-warn');
-    if(!el){clearInterval(_timerInterval);return;}
-    const elapsed=Math.floor((new Date()-new Date(active.checkinTime))/1000);
-    el.textContent=U.fmtTimer(elapsed);
-    if(w) w.style.display=Math.floor(elapsed/60)<minM?'flex':'none';
-  }
-  tick();
-  _timerInterval=setInterval(tick,1000);
+  // Re-fetch the active check-in and min hours setting to avoid stale values
+  Promise.all([
+    API.get('/checkins/me'),
+    API.get('/lookup')
+  ]).then(([ciR, lkpR]) => {
+    const active = (ciR.data||[]).find(c=>!c.checkoutTime);
+    if(!active) return;
+    const minH = parseInt((lkpR.data||{}).min_login_hours||'10', 10);
+    const minM = minH * 60;
+    function tick(){
+      const el=document.getElementById('ci-timer');
+      const w=document.getElementById('ci-warn');
+      if(!el){clearInterval(_timerInterval);return;}
+      const elapsed=Math.floor((new Date()-new Date(active.checkinTime))/1000);
+      el.textContent=U.fmtTimer(elapsed);
+      if(w) w.style.display=Math.floor(elapsed/60)<minM?'flex':'none';
+    }
+    tick();
+    _timerInterval=setInterval(tick,1000);
+  }).catch(()=>{});
 }
 
 /* ════════════════════════════════════════════════════
    VIEW: MY LOGIN HISTORY
 ════════════════════════════════════════════════════ */
-function vMyHist(){
-  const hist=DB.find(T.hist,h=>h.userId===Auth.s.userId)
-    .sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime));
+async function vMyHist(){
+  const histR=await API.get('/history/me');
+  const hist=histR.data||[];
   const rows=hist.length?hist.map((h,i)=>{
     const dur=h.logoutTime?Math.round((new Date(h.logoutTime)-new Date(h.loginTime))/60000):null;
     return `<tr>
@@ -758,14 +857,27 @@ function vMyHist(){
 /* ════════════════════════════════════════════════════
    VIEW: USER MANAGEMENT  (Admin+)
 ════════════════════════════════════════════════════ */
-function vUsers(){
+async function vUsers(){
   const role=Auth.s.role;
-  const users=DB.all(T.users).filter(u=>{
-    if(role==='admin') return u.role!=='superadmin'&&u.id!==Auth.s.userId;
-    return u.id!==Auth.s.userId; // superadmin sees all except self
-  }).sort((a,b)=>a.username.localeCompare(b.username));
+  const allR=await API.get('/users');
+  const all=allR.data||[];
+  const pending=all.filter(u=>u.status==='pending');
+  const regular=all.filter(u=>u.status!=='pending');
 
-  const rows=users.length?users.map(u=>`
+  const pendRows=pending.length?pending.map(u=>`
+    <tr>
+      <td><div class="fw-6">${U.esc(u.username)}</div><div class="text-sm text-muted">${U.esc(u.legalName||'')}</div></td>
+      <td>${U.esc(u.email||'—')}</td>
+      <td>${U.esc(u.contactInfo||'—')}</td>
+      <td class="text-sm">${U.fmtDT(u.createdAt)}</td>
+      <td><div class="flex gap-2">
+        <button class="btn btn-sm btn-success" onclick="approveUser('${u.id}','${U.esc(u.username)}')">✅ Approve</button>
+        <button class="btn btn-sm btn-danger"  onclick="rejectUser('${u.id}','${U.esc(u.username)}')">❌ Reject</button>
+      </div></td>
+    </tr>`).join('')
+    :`<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--muted)">No pending requests</td></tr>`;
+
+  const rows=regular.length?regular.map(u=>`
     <tr data-row="${U.esc((u.username+' '+u.legalName+' '+u.email).toLowerCase())}">
       <td><div class="fw-6">${U.esc(u.username)}</div><div class="text-sm text-muted">${U.esc(u.legalName||'')}</div></td>
       <td><span class="badge b-${u.role}">${u.role}</span></td>
@@ -778,16 +890,25 @@ function vUsers(){
         ${u.status==='active'
           ?`<button class="btn btn-sm btn-warning" onclick="toggleUser('${u.id}','freeze','${U.esc(u.username)}')">🔒 Freeze</button>`
           :`<button class="btn btn-sm btn-success" onclick="toggleUser('${u.id}','activate','${U.esc(u.username)}')">✅ Activate</button>`}
-        <button class="btn btn-sm btn-outline" onclick="viewUserHist('${u.id}','${U.esc(u.username)}')">📜 History</button>
+        <button class="btn btn-sm btn-outline" onclick="viewUserHist('${u.id}')">📜 History</button>
       </div></td>
     </tr>`).join('')
     :`<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">No users found</td></tr>`;
 
   return `<div class="page-header"><h2>👥 User Management</h2><p>Manage accounts and permissions</p></div>
   <div id="users-alert"></div>
+  ${pending.length?`<div class="card" style="border-color:var(--warning)">
+    <div class="card-header" style="background:#fffbeb;border-radius:8px 8px 0 0">
+      <h3>⏳ Pending Approvals (${pending.length})</h3>
+      <span class="badge b-pending">Action Required</span>
+    </div>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th>User</th><th>Email</th><th>Contact</th><th>Registered</th><th>Actions</th>
+    </tr></thead><tbody>${pendRows}</tbody></table></div>
+  </div>`:''}
   <div class="card">
     <div class="card-header">
-      <h3>All Users (${users.length})</h3>
+      <h3>All Users (${regular.length})</h3>
       <input class="form-control" id="usr-search" style="width:200px" placeholder="Search…" oninput="filterUsersTable()">
     </div>
     <div class="tbl-wrap"><table id="usr-tbl"><thead><tr>
@@ -797,7 +918,7 @@ function vUsers(){
 }
 
 function filterUsersTable(){
-  const q=document.getElementById('usr-search').value.toLowerCase();
+  const q=document.getElementById('usr-search')?.value.toLowerCase()||'';
   document.querySelectorAll('#usr-tbl tbody tr[data-row]').forEach(r=>{
     r.style.display=r.dataset.row.includes(q)?'':'none';
   });
@@ -806,9 +927,13 @@ function filterUsersTable(){
 /* ════════════════════════════════════════════════════
    VIEW: ALL LOGIN HISTORY  (Admin+)
 ════════════════════════════════════════════════════ */
-function vAllHist(){
-  const users=DB.all(T.users);
+async function vAllHist(){
+  const usersR=await API.get('/users');
+  const users=usersR.data||[];
+  const histR=await API.get('/history');
+  const hist=(histR.data||[]);
   const opts=users.map(u=>`<option value="${u.id}">${U.esc(u.username)}</option>`).join('');
+  const tableHtml=histTable(hist);
   return `<div class="page-header"><h2>📊 Login History</h2><p>All user login and session records</p></div>
   <div class="card">
     <div class="card-header"><h3>Filters</h3></div>
@@ -831,7 +956,7 @@ function vAllHist(){
       </div>
     </div>
   </div>
-  <div class="card"><div id="hist-tbl">${histTable(DB.all(T.hist).sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)))}</div></div>`;
+  <div class="card"><div id="hist-tbl">${tableHtml}</div></div>`;
 }
 
 function histTable(data){
@@ -852,26 +977,31 @@ function histTable(data){
   </tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-function applyHistFilter(){
-  let data=DB.all(T.hist);
-  const uid=document.getElementById('hf-user').value;
-  const from=document.getElementById('hf-from').value;
-  const to=document.getElementById('hf-to').value;
-  const st=document.getElementById('hf-status').value;
-  if(uid) data=data.filter(h=>h.userId===uid);
-  if(from) data=data.filter(h=>new Date(h.loginTime)>=new Date(from));
-  if(to) data=data.filter(h=>new Date(h.loginTime)<=new Date(to+'T23:59:59'));
-  if(st) data=data.filter(h=>h.status===st);
-  data.sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime));
-  document.getElementById('hist-tbl').innerHTML=histTable(data);
+async function applyHistFilter(){
+  const uid  =document.getElementById('hf-user')?.value||'';
+  const from =document.getElementById('hf-from')?.value||'';
+  const to   =document.getElementById('hf-to')?.value||'';
+  const st   =document.getElementById('hf-status')?.value||'';
+  let qs='';
+  if(uid)  qs+=(qs?'&':'?')+'user_id='+encodeURIComponent(uid);
+  if(from) qs+=(qs?'&':'?')+'from_date='+encodeURIComponent(from);
+  if(to)   qs+=(qs?'&':'?')+'to_date='+encodeURIComponent(to);
+  if(st)   qs+=(qs?'&':'?')+'status='+encodeURIComponent(st);
+  try{
+    const r=await API.get('/history'+qs);
+    document.getElementById('hist-tbl').innerHTML=histTable(r.data||[]);
+  }catch(e){
+    document.getElementById('hist-tbl').innerHTML=`<div class="alert alert-error">${U.esc(e.message)}</div>`;
+  }
 }
-function resetHistFilter(){
+async function resetHistFilter(){
   ['hf-user','hf-from','hf-to','hf-status'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  document.getElementById('hist-tbl').innerHTML=histTable(DB.all(T.hist).sort((a,b)=>new Date(b.loginTime)-new Date(a.loginTime)));
+  const r=await API.get('/history');
+  document.getElementById('hist-tbl').innerHTML=histTable(r.data||[]);
 }
-function viewUserHist(uid,uname){
+function viewUserHist(uid){
   showView('all-hist');
-  setTimeout(()=>{const s=document.getElementById('hf-user');if(s){s.value=uid;applyHistFilter();}},80);
+  setTimeout(()=>{const s=document.getElementById('hf-user');if(s){s.value=uid;applyHistFilter();}},200);
 }
 
 /* ════════════════════════════════════════════════════
@@ -905,20 +1035,6 @@ function vBulkImport(){
    VIEW: CREATE ADMIN  (Super Admin)
 ════════════════════════════════════════════════════ */
 function vCreateAdmin(){
-  const admins=DB.find(T.users,u=>u.role==='admin');
-  const rows=admins.length?admins.map(u=>`<tr>
-    <td><strong>${U.esc(u.username)}</strong></td>
-    <td>${U.esc(u.legalName||'—')}</td>
-    <td>${U.esc(u.email||'—')}</td>
-    <td><span class="badge b-${u.status}">${u.status}</span></td>
-    <td class="text-sm">${U.fmtD(u.createdAt)}</td>
-    <td><div class="flex gap-2">
-      ${u.status==='active'
-        ?`<button class="btn btn-sm btn-warning" onclick="toggleUser('${u.id}','freeze','${U.esc(u.username)}')">🔒 Freeze</button>`
-        :`<button class="btn btn-sm btn-success" onclick="toggleUser('${u.id}','activate','${U.esc(u.username)}')">✅ Activate</button>`}
-    </div></td>
-  </tr>`).join(''):`<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">No admins yet</td></tr>`;
-
   return `<div class="page-header"><h2>🛡️ Create Admin User</h2><p>Create a new administrator account</p></div>
   <div id="adm-alert"></div>
   <div class="card" style="max-width:560px">
@@ -940,124 +1056,167 @@ function vCreateAdmin(){
         <input type="password" class="form-control" id="na-conf" placeholder="Confirm password"></div>
     </div>
     <button class="btn btn-primary" onclick="doCreateAdmin()">🛡️ Create Admin</button>
-  </div>
-  <div class="card">
-    <div class="card-header"><h3>Existing Admins (${admins.length})</h3></div>
-    <div class="tbl-wrap"><table><thead><tr>
-      <th>Username</th><th>Legal Name</th><th>Email</th><th>Status</th><th>Created</th><th>Actions</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }
 
 /* ════════════════════════════════════════════════════
-   VIEW: JSON DB VIEWER  (Super Admin)
+   VIEW: DB VIEWER  (Super Admin – reads from ORDS)
 ════════════════════════════════════════════════════ */
-const JSON_TABLES=[
-  {k:'users',label:'👥 Users'},
-  {k:'sessions',label:'🔐 Sessions'},
-  {k:'login_history',label:'📜 Login History'},
-  {k:'checkins',label:'⏱️ Check-ins'},
-  {k:'lookup',label:'⚙️ Lookup'}
+const JSON_SECTIONS=[
+  {k:'users',   label:'👥 Users',    path:'/users'},
+  {k:'sessions',label:'🔐 Sessions', path:'/sessions'},
+  {k:'history', label:'📜 History',  path:'/history'},
+  {k:'checkins',label:'⏱️ Check-ins',path:'/checkins'},
+  {k:'lookup',  label:'⚙️ Lookup',   path:'/lookup'},
 ];
-const TK_MAP={'users':T.users,'sessions':T.sessions,'login_history':T.hist,'checkins':T.ci,'lookup':T.lkp};
+let _jvActive='users';
 
-function vJsonViewer(activeK){
-  activeK=activeK||'users';
-  return `<div class="page-header"><h2>📁 JSON Database Viewer</h2><p>View and export all database tables</p></div>
+async function vJsonViewer(){
+  return `<div class="page-header"><h2>📁 DB Viewer</h2><p>View data from APEX ORDS endpoints</p></div>
   <div class="tbl-btns" id="jtbl-btns">
-    ${JSON_TABLES.map(t=>`<button class="tbl-btn ${t.k===activeK?'active':''}" data-tk="${t.k}" onclick="switchJsonTbl('${t.k}')">${t.label}</button>`).join('')}
+    ${JSON_SECTIONS.map(s=>`<button class="tbl-btn ${s.k===_jvActive?'active':''}" data-tk="${s.k}" onclick="switchJsonSec('${s.k}')">${s.label}</button>`).join('')}
   </div>
-  <div class="card" id="jtbl-content">${jsonTblContent(activeK)}</div>`;
+  <div class="card" id="jtbl-content">${await jsonSecContent(_jvActive)}</div>`;
 }
 
-function jsonTblContent(k){
-  const tkey=TK_MAP[k]||k;
-  const data=DB.all(tkey);
-  const exportBtn=`<button class="btn btn-sm btn-outline" onclick="exportJson('${k}')">⬇️ Export JSON</button>`;
-  if(k==='lookup'){
-    const entries=Object.entries(data);
-    return `<div class="card-header"><h3>⚙️ Lookup Settings</h3>${exportBtn}</div>
-    <div class="tbl-wrap"><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>
-    ${entries.length?entries.map(([key,val])=>`<tr>
-      <td><strong>${U.esc(key)}</strong></td>
-      <td>${U.esc(typeof val==='object'?JSON.stringify(val):String(val))}</td>
-    </tr>`).join(''):'<tr><td colspan="2" style="text-align:center;padding:20px;color:var(--muted)">Empty</td></tr>'}
-    </tbody></table></div>`;
+async function jsonSecContent(k){
+  const sec=JSON_SECTIONS.find(s=>s.k===k);
+  if(!sec) return '';
+  try{
+    const r=await API.get(sec.path);
+    const data=r.data;
+    const exportBtn=`<button class="btn btn-sm btn-outline" onclick="exportSecJson('${k}')">⬇️ Export JSON</button>`;
+    if(k==='lookup'&&data&&typeof data==='object'&&!Array.isArray(data)){
+      const entries=Object.entries(data);
+      return `<div class="card-header"><h3>⚙️ Lookup Settings</h3>${exportBtn}</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>
+      ${entries.length?entries.map(([key,val])=>`<tr>
+        <td><strong>${U.esc(key)}</strong></td>
+        <td>${U.esc(typeof val==='object'?JSON.stringify(val):String(val))}</td>
+      </tr>`).join(''):'<tr><td colspan="2" style="text-align:center;padding:20px;color:var(--muted)">Empty</td></tr>'}
+      </tbody></table></div>`;
+    }
+    if(!Array.isArray(data)||!data.length)
+      return `<div class="card-header"><h3>${U.esc(k)}</h3>${exportBtn}</div>
+      <div class="empty"><div class="empty-icon">📭</div><p>No records</p></div>`;
+    const cols=Object.keys(data[0]);
+    const rows=data.map(row=>`<tr>${cols.map(c=>{
+      let v=row[c];
+      if(c==='passwordHash'||c==='password') v='••••••••';
+      else if(v===null||v===undefined) v='—';
+      else if(typeof v==='boolean') v=v?'true':'false';
+      else if(typeof v==='object') v=JSON.stringify(v);
+      else v=String(v);
+      return `<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${U.esc(v)}">${U.esc(v)}</td>`;
+    }).join('')}</tr>`).join('');
+    return `<div class="card-header"><h3>${U.esc(k)} <span class="text-muted">(${data.length})</span></h3>${exportBtn}</div>
+    <div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${U.esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+  }catch(e){
+    return `<div class="alert alert-error">Failed to load ${k}: ${U.esc(e.message)}</div>`;
   }
-  if(!Array.isArray(data)||!data.length)
-    return `<div class="card-header"><h3>${U.esc(k)}</h3>${exportBtn}</div>
-    <div class="empty"><div class="empty-icon">📭</div><p>No records</p></div>`;
-  const cols=Object.keys(data[0]);
-  const rows=data.map(row=>`<tr>${cols.map(c=>{
-    let v=row[c];
-    if(c==='password') v='••••••••';
-    else if(v===null||v===undefined) v='—';
-    else if(typeof v==='boolean') v=v?'true':'false';
-    else if(typeof v==='object') v=JSON.stringify(v);
-    else v=String(v);
-    return `<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${U.esc(v)}">${U.esc(v)}</td>`;
-  }).join('')}</tr>`).join('');
-  return `<div class="card-header"><h3>${U.esc(k)} <span class="text-muted">(${data.length} records)</span></h3>${exportBtn}</div>
-  <div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${U.esc(c)}</th>`).join('')}</tr></thead>
-  <tbody>${rows}</tbody></table></div>`;
 }
 
-function switchJsonTbl(k){
+async function switchJsonSec(k){
+  _jvActive=k;
   document.querySelectorAll('.tbl-btn').forEach(b=>b.classList.toggle('active',b.dataset.tk===k));
-  document.getElementById('jtbl-content').innerHTML=jsonTblContent(k);
+  const el=document.getElementById('jtbl-content');
+  if(el) el.innerHTML=await jsonSecContent(k);
 }
 
-function exportJson(k){
-  const tkey=TK_MAP[k]||k;
-  let data=DB.all(tkey);
-  if(Array.isArray(data)) data=data.map(r=>{const c={...r};if(c.password)c.password='**REDACTED**';return c;});
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=k+'.json';a.click();URL.revokeObjectURL(url);
+async function exportSecJson(k){
+  const sec=JSON_SECTIONS.find(s=>s.k===k);
+  if(!sec) return;
+  try{
+    const r=await API.get(sec.path);
+    let data=r.data;
+    if(Array.isArray(data)) data=data.map(row=>{const c={...row};if(c.passwordHash)c.passwordHash='**REDACTED**';return c;});
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=k+'.json';a.click();URL.revokeObjectURL(url);
+  }catch(e){ alert('Export failed: '+e.message); }
 }
 
 /* ════════════════════════════════════════════════════
-   VIEW: LOOKUP / SYSTEM SETTINGS  (Super Admin)
+   VIEW: SYSTEM SETTINGS / LOOKUP  (Super Admin)
 ════════════════════════════════════════════════════ */
-function vLookup(){
-  const lkp=DB.all(T.lkp);
-  const ips=(lkp.allowedIPs||[]).join('\n');
-  return `<div class="page-header"><h2>⚙️ System Settings</h2><p>Configure lookup values and access controls</p></div>
+async function vLookup(){
+  const r=await API.get('/lookup');
+  const lkp=r.data||{};
+  const ips=(lkp.allowed_ips||'[]').replace(/[\[\]"]/g,'').split(',').filter(Boolean).join('\n');
+  const ordsUrl=CFG.getBase();
+  return `<div class="page-header"><h2>⚙️ System Settings</h2><p>Configure lookup values, access controls and ORDS URL</p></div>
   <div id="lkp-alert"></div>
+  <div class="card" style="max-width:640px">
+    <div class="card-header"><h3>🔗 ORDS Configuration</h3></div>
+    <div class="form-group">
+      <label>ORDS Base URL</label>
+      <input class="form-control" id="ords-url-inp" value="${U.esc(ordsUrl)}"
+        placeholder="https://your-apex-host/ords/watlogs">
+      <p class="text-sm text-muted mt-2">The base URL for WatLogs ORDS REST API</p>
+    </div>
+    <button class="btn btn-primary" onclick="saveOrdsUrl('lkp-alert')">💾 Save URL</button>
+  </div>
   <div class="card" style="max-width:640px">
     <div class="card-header"><h3>IP Address Restriction</h3></div>
     <div class="form-group">
-      <label><input type="checkbox" id="ip-ena" ${lkp.ipRestrictionEnabled?'checked':''} style="margin-right:6px">
+      <label><input type="checkbox" id="ip-ena" ${lkp.ip_restriction_enabled==='true'?'checked':''} style="margin-right:6px">
         Enable IP Address Restriction</label>
       <p class="text-sm text-muted mt-2">When enabled, users can only login from the listed IP addresses.</p>
     </div>
     <div class="form-group">
       <label>Allowed IP Addresses <span class="text-muted">(one per line)</span></label>
       <textarea class="form-control" id="ip-list" rows="5" placeholder="192.168.1.100&#10;10.0.0.1">${U.esc(ips)}</textarea>
-      <p class="text-sm text-muted mt-2">Exact IP or prefix (e.g. <code>192.168.1</code> matches all 192.168.1.x)</p>
     </div>
     <div class="divider"></div>
     <div class="grid-2">
       <div class="form-group">
         <label>Minimum Login Hours</label>
-        <input type="number" class="form-control" id="min-h" value="${lkp.minLoginHours||10}" min="1" max="24">
-        <p class="text-sm text-muted mt-2">Minimum hours per check-in session (default: 10)</p>
+        <input type="number" class="form-control" id="min-h" value="${lkp.min_login_hours||10}" min="1" max="24">
       </div>
       <div class="form-group">
         <label>Application Name</label>
-        <input class="form-control" id="app-name" value="${U.esc(lkp.appName||'WatLogs')}">
+        <input class="form-control" id="app-name" value="${U.esc(lkp.app_name||'WatLogs')}">
       </div>
+    </div>
+    <div class="form-group">
+      <label><input type="checkbox" id="req-appr" ${lkp.require_approval==='true'?'checked':''} style="margin-right:6px">
+        Require Admin Approval for New Sign-ups</label>
+      <p class="text-sm text-muted mt-2">When enabled, new user accounts start as "pending" until approved by an admin.</p>
     </div>
     <button class="btn btn-primary" onclick="saveLookup()">💾 Save Settings</button>
   </div>
   <div class="card" style="max-width:640px">
     <div class="card-header"><h3>Current Settings</h3></div>
     <div class="tbl-wrap"><table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody>
-      <tr><td>IP Restriction</td><td>${lkp.ipRestrictionEnabled?'<span class="badge b-in">Enabled</span>':'<span class="badge b-out">Disabled</span>'}</td></tr>
-      <tr><td>Allowed IPs</td><td>${(lkp.allowedIPs||[]).length?(lkp.allowedIPs).map(ip=>`<code style="margin-right:4px">${U.esc(ip)}</code>`).join(''):'—'}</td></tr>
-      <tr><td>Min Login Hours</td><td>${lkp.minLoginHours||10} hours</td></tr>
-      <tr><td>App Name</td><td>${U.esc(lkp.appName||'WatLogs')}</td></tr>
+      <tr><td>IP Restriction</td><td>${lkp.ip_restriction_enabled==='true'?'<span class="badge b-in">Enabled</span>':'<span class="badge b-out">Disabled</span>'}</td></tr>
+      <tr><td>Require Approval</td><td>${lkp.require_approval==='true'?'<span class="badge b-in">Yes</span>':'<span class="badge b-out">No</span>'}</td></tr>
+      <tr><td>Min Login Hours</td><td>${lkp.min_login_hours||10} hours</td></tr>
+      <tr><td>App Name</td><td>${U.esc(lkp.app_name||'WatLogs')}</td></tr>
+      <tr><td>ORDS Base URL</td><td><code style="word-break:break-all">${U.esc(ordsUrl||'—')}</code></td></tr>
     </tbody></table></div>
+  </div>`;
+}
+
+/* ════════════════════════════════════════════════════
+   VIEW: ORDS SETTINGS  (Admin)
+════════════════════════════════════════════════════ */
+function vOrdsSettings(){
+  const url=CFG.getBase();
+  return `<div class="page-header"><h2>🔗 ORDS Settings</h2><p>Configure the Oracle APEX ORDS REST API base URL</p></div>
+  <div id="ords-alert"></div>
+  <div class="card" style="max-width:640px">
+    <div class="card-header"><h3>ORDS Base URL</h3></div>
+    <div class="form-group">
+      <label>ORDS Base URL *</label>
+      <input class="form-control" id="ords-url-inp" value="${U.esc(url)}"
+        placeholder="https://your-apex-host/ords/watlogs">
+      <p class="text-sm text-muted mt-2">Example: <code>https://apex.oracle.com/pls/apex/watlogs</code></p>
+    </div>
+    <button class="btn btn-primary" onclick="saveOrdsUrl('ords-alert')">💾 Save URL</button>
+    <div class="mt-3">
+      <p class="text-sm text-muted">Current URL: <code>${U.esc(url||'Not configured')}</code></p>
+    </div>
   </div>`;
 }
 
@@ -1069,99 +1228,115 @@ function switchTab(tab){
   document.getElementById('login-form').style.display=tab==='login'?'block':'none';
   document.getElementById('signup-form').style.display=tab==='signup'?'block':'none';
   document.getElementById('auth-alert').innerHTML='';
+  // Generate captcha for the active tab
+  setTimeout(()=>Captcha.generate(tab),50);
 }
 
 async function doLogin(){
   const username=document.getElementById('l-user').value.trim();
   const password=document.getElementById('l-pass').value;
-  const role=document.getElementById('l-role').value;
+  const role    =document.getElementById('l-role').value;
+  const capInput=document.getElementById('cap-input-login').value.trim();
   if(!username||!password){showAuthAlert('Please enter username and password.');return;}
+  if(!capInput){showAuthAlert('Please enter the captcha code.');return;}
+  if(!Captcha.verify('login',capInput)){
+    showAuthAlert('Incorrect captcha code. Please try again.');
+    Captcha.generate('login');
+    return;
+  }
   const btn=document.getElementById('login-btn');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
-  const r=await Auth.login(username,password,role);
+  const r=await Auth.login(username,password,role,capInput,Captcha.getToken('login'));
   btn.disabled=false; btn.innerHTML='Sign In';
-  if(!r.ok){showAuthAlert(r.err);return;}
+  if(!r.ok){showAuthAlert(r.err); Captcha.generate('login'); return;}
   loadApp();
 }
 
-function doSignup(){
+async function doSignup(){
   const legalName=document.getElementById('s-name').value.trim();
-  const username=document.getElementById('s-user').value.trim();
-  const email=document.getElementById('s-email').value.trim();
-  const contact=document.getElementById('s-contact').value.trim();
-  const pass=document.getElementById('s-pass').value;
-  const conf=document.getElementById('s-conf').value;
+  const username =document.getElementById('s-user').value.trim();
+  const email    =document.getElementById('s-email').value.trim();
+  const contact  =document.getElementById('s-contact').value.trim();
+  const pass     =document.getElementById('s-pass').value;
+  const conf     =document.getElementById('s-conf').value;
+  const capInput =document.getElementById('cap-input-signup').value.trim();
   if(!legalName||!username||!email||!pass){showAuthAlert('Please fill in all required fields (*).','error');return;}
   if(pass!==conf){showAuthAlert('Passwords do not match.','error');return;}
   if(pass.length<6){showAuthAlert('Password must be at least 6 characters.','error');return;}
-  const r=Auth.signup({legalName,username,email,contact,password:pass});
-  if(!r.ok){showAuthAlert(r.err,'error');return;}
+  if(!capInput){showAuthAlert('Please enter the captcha code.','error');return;}
+  if(!Captcha.verify('signup',capInput)){
+    showAuthAlert('Incorrect captcha code. Please try again.','error');
+    Captcha.generate('signup');
+    return;
+  }
+  const r=await Auth.signup({legalName,username,email,contact,password:pass},capInput,Captcha.getToken('signup'));
+  if(!r.ok){showAuthAlert(r.err,'error'); Captcha.generate('signup'); return;}
   switchTab('login');
   document.getElementById('l-user').value=username;
-  showAuthAlert('Account created successfully! You can now sign in.','success');
+  showAuthAlert(r.msg||'Account created successfully!','success');
 }
 
 function doLogout(){
-  showConfirm('Sign Out','Are you sure you want to sign out?',()=>{
+  showConfirm('Sign Out','Are you sure you want to sign out?',async()=>{
     if(_timerInterval){clearInterval(_timerInterval);_timerInterval=null;}
-    Auth.logout();
+    await Auth.logout();
     document.getElementById('dashboard-view').style.display='none';
     document.getElementById('auth-view').style.display='flex';
     document.getElementById('auth-alert').innerHTML='';
     document.getElementById('l-user').value='';
     document.getElementById('l-pass').value='';
+    setTimeout(()=>Captcha.generate('login'),50);
   });
 }
 
-function saveProfile(){
-  const name=document.getElementById('p-name').value.trim();
-  const email=document.getElementById('p-email').value.trim();
+async function saveProfile(){
+  const name   =document.getElementById('p-name').value.trim();
+  const email  =document.getElementById('p-email').value.trim();
   const contact=document.getElementById('p-contact').value.trim();
   if(!name){showAlert('prof-alert','Legal name cannot be empty.');return;}
-  if(email&&email!==Auth.s.user.email){
-    const dup=DB.findOne(T.users,u=>u.email.toLowerCase()===email.toLowerCase()&&u.id!==Auth.s.userId);
-    if(dup){showAlert('prof-alert','Email already used by another account.');return;}
-  }
-  DB.update(T.users,Auth.s.userId,{legalName:name,email,contactInfo:contact});
-  Auth.s.user=DB.findId(T.users,Auth.s.userId);
-  document.getElementById('sb-uname').textContent=name||Auth.s.username;
-  document.getElementById('sb-avatar').textContent=U.initials(name||Auth.s.username);
-  showAlert('prof-alert','Profile updated successfully!','success');
+  try{
+    await API.put('/users/'+Auth.s.userId,{legalName:name,email,contact});
+    Auth.s.user={...Auth.s.user,legalName:name,email,contactInfo:contact};
+    document.getElementById('sb-uname').textContent=name||Auth.s.username;
+    document.getElementById('sb-avatar').textContent=U.initials(name||Auth.s.username);
+    showAlert('prof-alert','Profile updated successfully!','success');
+  }catch(e){ showAlert('prof-alert',e.message); }
 }
 
-function changePassword(){
+async function changePassword(){
   const cur=document.getElementById('p-cpwd').value;
-  const np=document.getElementById('p-npwd').value;
-  const rp=document.getElementById('p-rpwd').value;
+  const np =document.getElementById('p-npwd').value;
+  const rp =document.getElementById('p-rpwd').value;
   if(!cur||!np||!rp){showAlert('prof-alert','Fill in all password fields.');return;}
-  if(!U.checkPwd(cur,Auth.s.user.password)){showAlert('prof-alert','Current password is incorrect.');return;}
   if(np.length<6){showAlert('prof-alert','New password must be at least 6 characters.');return;}
   if(np!==rp){showAlert('prof-alert','New passwords do not match.');return;}
-  DB.update(T.users,Auth.s.userId,{password:U.hashPwd(np)});
-  Auth.s.user=DB.findId(T.users,Auth.s.userId);
-  ['p-cpwd','p-npwd','p-rpwd'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  showAlert('prof-alert','Password updated successfully!','success');
+  try{
+    await API.put('/users/'+Auth.s.userId+'/password',{currentPassword:cur,newPassword:np});
+    ['p-cpwd','p-npwd','p-rpwd'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    showAlert('prof-alert','Password updated successfully!','success');
+  }catch(e){ showAlert('prof-alert',e.message); }
 }
 
-function doCheckin(){
-  const exists=DB.findOne(T.ci,c=>c.userId===Auth.s.userId&&!c.checkoutTime);
-  if(exists){alert('You are already checked in.');return;}
-  DB.insert(T.ci,{userId:Auth.s.userId,username:Auth.s.username,checkinTime:U.now(),checkoutTime:null,duration:null});
-  showView('checkins');
-}
-
-function doCheckout(){
-  const act=DB.findOne(T.ci,c=>c.userId===Auth.s.userId&&!c.checkoutTime);
-  if(!act){alert('You are not checked in.');return;}
-  const mins=Math.round((new Date()-new Date(act.checkinTime))/60000);
-  const minM=(DB.all(T.lkp).minLoginHours||10)*60;
-  const msg=mins<minM
-    ?`You've been checked in for ${U.fmtDur(mins)} (minimum: ${U.fmtDur(minM)}). Check out anyway?`
-    :`Check out after ${U.fmtDur(mins)}?`;
-  showConfirm('Check Out',msg,()=>{
-    if(_timerInterval){clearInterval(_timerInterval);_timerInterval=null;}
-    DB.update(T.ci,act.id,{checkoutTime:U.now(),duration:mins});
+async function doCheckin(){
+  try{
+    await API.post('/checkins',{});
     showView('checkins');
+  }catch(e){ alert(e.message); }
+}
+
+async function doCheckout(ciId, minM, minH){
+  // Build current duration estimate
+  const act_row = (await API.get('/checkins/me').catch(()=>({data:[]}))).data?.find(c=>!c.checkoutTime);
+  const mins = act_row ? Math.round((new Date()-new Date(act_row.checkinTime))/60000) : 0;
+  const msg=mins<minM
+    ?`You've been checked in for ${U.fmtDur(mins)} (minimum: ${minH}h). Check out anyway?`
+    :`Check out after ${U.fmtDur(mins)}?`;
+  showConfirm('Check Out',msg,async()=>{
+    if(_timerInterval){clearInterval(_timerInterval);_timerInterval=null;}
+    try{
+      await API.put('/checkins/'+ciId,{});
+      showView('checkins');
+    }catch(e){ alert(e.message); }
   },mins<minM);
 }
 
@@ -1170,41 +1345,62 @@ function toggleUser(uid,action,uname){
   const msg=action==='freeze'
     ?`Freeze account of "${uname}"? They will not be able to login.`
     :`Activate account of "${uname}"?`;
-  showConfirm(title,msg,()=>{
+  showConfirm(title,msg,async()=>{
     const st=action==='freeze'?'frozen':'active';
-    DB.update(T.users,uid,{status:st});
-    if(action==='freeze'){
-      const sess=DB.findOne(T.sessions,s=>s.userId===uid&&s.active);
-      if(sess) DB.update(T.sessions,sess.id,{active:false,logoutTime:U.now()});
-    }
-    showView(_currentView);
-    const alertId=_currentView==='users'?'users-alert':_currentView==='create-admin'?'adm-alert':null;
-    if(alertId) showAlert(alertId,`User "${uname}" has been ${st}.`,'success');
+    try{
+      await API.put('/users/'+uid+'/status',{status:st});
+      showView(_currentView);
+      const alertId=_currentView==='users'?'users-alert':_currentView==='create-admin'?'adm-alert':null;
+      if(alertId) showAlert(alertId,`User "${uname}" has been ${st}.`,'success');
+    }catch(e){ alert(e.message); }
   },action==='freeze');
 }
 
-function doBulkImport(){
+function approveUser(uid,uname){
+  showConfirm('✅ Approve Account',`Approve and activate account of "${uname}"?`,async()=>{
+    try{
+      await API.put('/users/'+uid+'/approve',{});
+      showView('users');
+      showAlert('users-alert',`User "${uname}" has been approved and activated.`,'success');
+    }catch(e){ alert(e.message); }
+  },false);
+}
+
+function rejectUser(uid,uname){
+  showConfirm('❌ Reject Account',`Reject and permanently freeze account of "${uname}"?`,async()=>{
+    try{
+      await API.put('/users/'+uid+'/status',{status:'frozen'});
+      showView('users');
+      showAlert('users-alert',`Account of "${uname}" has been rejected.`,'success');
+    }catch(e){ alert(e.message); }
+  },true);
+}
+
+async function doBulkImport(){
   const csv=document.getElementById('bulk-csv').value.trim();
   if(!csv){showAlert('bulk-alert','Please enter CSV data.');return;}
   const lines=csv.split('\n').map(l=>l.trim()).filter(Boolean);
   let start=0;
   if(lines[0].toLowerCase().startsWith('legal')) start=1;
-  let ok=0; const errs=[];
+  const usersArr=[];
+  const localErrs=[];
   for(let i=start;i<lines.length;i++){
     const p=lines[i].split(',').map(x=>x.trim());
-    if(p.length<5){errs.push(`Line ${i+1}: Need 5 fields (LegalName,Username,Email,ContactInfo,Password)`);continue;}
-    const [legalName,username,email,contactInfo,password]=p;
-    if(!username||!password){errs.push(`Line ${i+1}: Username and password required`);continue;}
-    if(DB.findOne(T.users,u=>u.username.toLowerCase()===username.toLowerCase())){errs.push(`Line ${i+1}: Username "${username}" already exists`);continue;}
-    DB.insert(T.users,{username,password:U.hashPwd(password),role:'user',
-      legalName,email,contactInfo,status:'active',createdBy:Auth.s.username,lastLogin:null,lastIp:null});
-    ok++;
+    if(p.length<5){localErrs.push(`Line ${i+1}: Need 5 fields`);continue;}
+    const [legalName,username,email,contact,password]=p;
+    if(!username||!password){localErrs.push(`Line ${i+1}: Username and password required`);continue;}
+    usersArr.push({legalName,username,email,contact,password});
   }
-  let html='';
-  if(ok) html+=`<div class="alert alert-success">✅ Imported ${ok} user(s) successfully.</div>`;
-  if(errs.length) html+=`<div class="alert alert-error"><div><strong>⚠️ ${errs.length} error(s):</strong>
-    <ul style="margin-top:6px;padding-left:18px">${errs.map(e=>`<li>${U.esc(e)}</li>`).join('')}</ul></div></div>`;
-  document.getElementById('bulk-result').innerHTML=html;
+  try{
+    const r=await API.post('/users/bulk',{users:usersArr});
+    const d=r.data||{};
+    let html='';
+    if(d.imported) html+=`<div class="alert alert-success">✅ Imported ${d.imported} user(s) successfully.</div>`;
+    const allErrs=[...localErrs,...(d.errors||[])];
+    if(allErrs.length) html+=`<div class="alert alert-error"><strong>⚠️ ${allErrs.length} error(s):</strong>
+      <ul style="margin-top:6px;padding-left:18px">${allErrs.map(e=>`<li>${U.esc(e)}</li>`).join('')}</ul></div>`;
+    document.getElementById('bulk-result').innerHTML=html;
+  }catch(e){ showAlert('bulk-alert',e.message); }
 }
 
 function downloadTemplate(){
@@ -1214,33 +1410,74 @@ function downloadTemplate(){
   const a=document.createElement('a');a.href=url;a.download='bulk_import_template.csv';a.click();URL.revokeObjectURL(url);
 }
 
-function doCreateAdmin(){
-  const name=document.getElementById('na-name').value.trim();
-  const user=document.getElementById('na-user').value.trim();
-  const email=document.getElementById('na-email').value.trim();
+async function doCreateAdmin(){
+  const name   =document.getElementById('na-name').value.trim();
+  const user   =document.getElementById('na-user').value.trim();
+  const email  =document.getElementById('na-email').value.trim();
   const contact=document.getElementById('na-contact').value.trim();
-  const pass=document.getElementById('na-pass').value;
-  const conf=document.getElementById('na-conf').value;
+  const pass   =document.getElementById('na-pass').value;
+  const conf   =document.getElementById('na-conf').value;
   if(!name||!user||!email||!pass){showAlert('adm-alert','Fill in all required fields.');return;}
   if(pass!==conf){showAlert('adm-alert','Passwords do not match.');return;}
-  if(DB.findOne(T.users,u=>u.username.toLowerCase()===user.toLowerCase())){showAlert('adm-alert','Username already taken.');return;}
-  if(email&&DB.findOne(T.users,u=>u.email.toLowerCase()===email.toLowerCase())){showAlert('adm-alert','Email already registered.');return;}
-  DB.insert(T.users,{username:user,password:U.hashPwd(pass),role:'admin',
-    legalName:name,email,contactInfo:contact,status:'active',createdBy:Auth.s.username,lastLogin:null,lastIp:null});
-  showAlert('adm-alert',`Admin "${user}" created successfully!`,'success');
-  ['na-name','na-user','na-email','na-contact','na-pass','na-conf'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  showView('create-admin');
+  try{
+    await API.post('/users',{username:user,password:pass,legalName:name,email,contact,role:'admin'});
+    showAlert('adm-alert',`Admin "${user}" created successfully!`,'success');
+    ['na-name','na-user','na-email','na-contact','na-pass','na-conf'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  }catch(e){ showAlert('adm-alert',e.message); }
 }
 
-function saveLookup(){
-  const enabled=document.getElementById('ip-ena').checked;
-  const rawIPs=document.getElementById('ip-list').value;
+async function saveLookup(){
+  const enabled =document.getElementById('ip-ena').checked;
+  const rawIPs  =document.getElementById('ip-list').value;
   const allowedIPs=rawIPs.split('\n').map(s=>s.trim()).filter(Boolean);
-  const minH=parseInt(document.getElementById('min-h').value,10)||10;
-  const appName=document.getElementById('app-name').value.trim()||'WatLogs';
-  DB.setLkp({ipRestrictionEnabled:enabled,allowedIPs,minLoginHours:minH,appName});
-  showAlert('lkp-alert','Settings saved successfully!','success');
-  showView('lookup');
+  const minH    =parseInt(document.getElementById('min-h').value,10)||10;
+  const appName =document.getElementById('app-name').value.trim()||'WatLogs';
+  const reqAppr =document.getElementById('req-appr').checked;
+  try{
+    await API.put('/lookup',{
+      ip_restriction_enabled: String(enabled),
+      allowed_ips: JSON.stringify(allowedIPs),
+      min_login_hours: String(minH),
+      app_name: appName,
+      require_approval: String(reqAppr)
+    });
+    // Also save ORDS URL if changed
+    const newOrds=(document.getElementById('ords-url-inp')?.value||'').trim();
+    if(newOrds) CFG.setBase(newOrds);
+    showAlert('lkp-alert','Settings saved successfully!','success');
+    showView('lookup');
+  }catch(e){ showAlert('lkp-alert',e.message); }
+}
+
+function saveOrdsUrl(alertId){
+  const url=(document.getElementById('ords-url-inp')?.value||'').trim();
+  if(!url){showAlert(alertId,'Please enter the ORDS base URL.');return;}
+  CFG.setBase(url);
+  showAlert(alertId,'ORDS base URL saved successfully!','success');
+  // Refresh the current view
+  if(alertId==='lkp-alert') showView('lookup');
+}
+
+function doSetupOrds(){
+  const url=(document.getElementById('setup-ords-url')?.value||'').trim();
+  if(!url){showAlert('setup-alert','Please enter the ORDS base URL.');return;}
+  CFG.setBase(url);
+  showSetup(false);
+  showAuth();
+}
+
+/* ════════════════════════════════════════════════════
+   VIEW TOGGLES
+════════════════════════════════════════════════════ */
+function showAuth(){
+  document.getElementById('auth-view').style.display='flex';
+  document.getElementById('setup-view').style.display='none';
+  document.getElementById('dashboard-view').style.display='none';
+  setTimeout(()=>{ Captcha.generate('login'); Captcha.generate('signup'); },80);
+}
+function showSetup(show){
+  document.getElementById('setup-view').style.display=show?'flex':'none';
+  document.getElementById('auth-view').style.display=show?'none':'flex';
 }
 
 /* ════════════════════════════════════════════════════
@@ -1248,21 +1485,32 @@ function saveLookup(){
 ════════════════════════════════════════════════════ */
 function loadApp(){
   document.getElementById('auth-view').style.display='none';
+  document.getElementById('setup-view').style.display='none';
   document.getElementById('dashboard-view').style.display='flex';
   buildSidebar();
   showView('dashboard');
 }
 
-function init(){
-  bootstrap();
-  if(Auth.restore()){
+async function init(){
+  // If ORDS base URL is not configured, show setup screen
+  if(!CFG.getBase()){
+    document.getElementById('setup-view').style.display='flex';
+    document.getElementById('auth-view').style.display='none';
+    document.getElementById('dashboard-view').style.display='none';
+    return;
+  }
+  // Try to restore existing session
+  document.getElementById('auth-view').style.display='none';
+  document.getElementById('setup-view').style.display='none';
+  document.getElementById('dashboard-view').style.display='none';
+  const sess = await Auth.restore();
+  if(sess){
     loadApp();
   } else {
-    document.getElementById('auth-view').style.display='flex';
-    document.getElementById('dashboard-view').style.display='none';
+    showAuth();
   }
   // Allow Enter key on login form
-  ['l-user','l-pass'].forEach(id=>{
+  ['l-user','l-pass','cap-input-login'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
   });
