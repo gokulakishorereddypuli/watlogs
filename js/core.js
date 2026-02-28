@@ -24,8 +24,13 @@ const U = {
     const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
   },
-  hashPwd: p => btoa(encodeURIComponent(p+'__wl2024__')),
-  checkPwd: (p,h) => U.hashPwd(p)===h,
+  today: () => new Date().toDateString(),
+  hashPwd: async p => {
+    const enc=new TextEncoder();
+    const buf=await crypto.subtle.digest('SHA-256',enc.encode(p+'__wl2024__'));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  },
+  checkPwd: async (p,h) => (await U.hashPwd(p))===h,
   initials: n => {
     if(!n) return '?';
     const p=n.trim().split(/\s+/);
@@ -109,7 +114,8 @@ const Auth = {
       ?UserStore.findByUsername(username)
       :DB.findOne(T.users,u=>u.username.toLowerCase()===username.toLowerCase());
     if(!user) return {ok:false,err:'Invalid username or password.'};
-    if(!U.checkPwd(password,user.password)) return {ok:false,err:'Invalid username or password.'};
+    if(!await U.checkPwd(password,user.password)) return {ok:false,err:'Invalid username or password.'};
+    if(user.status==='pending') return {ok:false,err:'Your account is pending approval by an administrator.'};
     if(user.status==='frozen') return {ok:false,err:'Account is frozen. Contact an administrator.'};
     if(role && user.role!==role)
       return {ok:false,err:`This account has role "${user.role}". Please select the correct role.`};
@@ -162,19 +168,20 @@ const Auth = {
     return Auth.s;
   },
 
-  signup(d){
+  signup: async (d) => {
     if((window.UserStore&&UserStore.findByUsername)?UserStore.findByUsername(d.username):DB.findOne(T.users,u=>u.username.toLowerCase()===d.username.toLowerCase()))
       return {ok:false,err:'Username already taken.'};
     if(d.email&&((window.UserStore&&UserStore.findByEmail)?UserStore.findByEmail(d.email):DB.findOne(T.users,u=>u.email.toLowerCase()===d.email.toLowerCase())))
       return {ok:false,err:'Email already registered.'};
+    const hashed=await U.hashPwd(d.password);
     if(window.UserStore&&UserStore.insert){
-      UserStore.insert({username:d.username,password:U.hashPwd(d.password),role:'user',
+      UserStore.insert({username:d.username,password:hashed,role:'user',
         legalName:d.legalName||'',email:d.email||'',contactInfo:d.contact||'',
-        status:'active',createdBy:'signup',lastLogin:null,lastIp:null});
+        status:'pending',createdBy:'signup',lastLogin:null,lastIp:null});
     }else{
-      DB.insert(T.users,{username:d.username,password:U.hashPwd(d.password),role:'user',
+      DB.insert(T.users,{username:d.username,password:hashed,role:'user',
         legalName:d.legalName||'',email:d.email||'',contactInfo:d.contact||'',
-        status:'active',createdBy:'signup',lastLogin:null,lastIp:null});
+        status:'pending',createdBy:'signup',lastLogin:null,lastIp:null});
     }
     return {ok:true};
   }
@@ -183,11 +190,11 @@ const Auth = {
 /* ════════════════════════════════════════════════════
    BOOTSTRAP  – seed default data if first run
 ════════════════════════════════════════════════════ */
-function bootstrap(){
+async function bootstrap(){
   const adminExists=(window.UserStore&&UserStore.findByUsername)?UserStore.findByUsername('superadmin'):DB.findOne(T.users,u=>u.username==='superadmin');
   if(!adminExists){
     const admin={id:'superadmin_root',username:'superadmin',
-      password:U.hashPwd('superadmin'),role:'superadmin',legalName:'Super Administrator',
+      password:await U.hashPwd('superadmin'),role:'superadmin',legalName:'Super Administrator',
       email:'superadmin@watlogs.local',contactInfo:'',status:'active',
       createdBy:'system',lastLogin:null,lastIp:null};
     if(window.UserStore&&UserStore.insert) UserStore.insert(admin);

@@ -103,11 +103,12 @@ tr:hover td{background:#fafbfc}
 /* ── Badges ── */
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500}
 .b-active{background:#dcfce7;color:#16a34a}.b-frozen{background:#dbeafe;color:#1d4ed8}
+.b-pending{background:#fef3c7;color:#d97706}
 .b-superadmin{background:#f3e8ff;color:#7c3aed}.b-admin{background:#fef3c7;color:#d97706}
 .b-user{background:#f0fdf4;color:#16a34a}
 .b-in{background:#dcfce7;color:#16a34a}.b-out{background:#f1f5f9;color:#64748b}
 .b-ok{background:#dcfce7;color:#16a34a}.b-short{background:#fef3c7;color:#d97706}
-.b-current{background:#dcfce7;color:#16a34a}
+.b-current{background:#dcfce7;color:#16a34a}.b-flag{background:#fee2e2;color:#dc2626}
 
 /* ── Modal ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;
