@@ -105,7 +105,9 @@ const Auth = {
       if(!ok) return {ok:false,err:`Your IP (${ip}) is not on the allowed list.`};
     }
 
-    const user=DB.findOne(T.users,u=>u.username.toLowerCase()===username.toLowerCase());
+    const user=(window.UserStore&&UserStore.findByUsername)
+      ?UserStore.findByUsername(username)
+      :DB.findOne(T.users,u=>u.username.toLowerCase()===username.toLowerCase());
     if(!user) return {ok:false,err:'Invalid username or password.'};
     if(!U.checkPwd(password,user.password)) return {ok:false,err:'Invalid username or password.'};
     if(user.status==='frozen') return {ok:false,err:'Account is frozen. Contact an administrator.'};
@@ -118,9 +120,15 @@ const Auth = {
 
     const sess=DB.insert(T.sessions,{userId:user.id,username:user.username,role:user.role,
       loginTime:U.now(),ipAddress:ip,active:true,logoutTime:null});
-    DB.insert(T.hist,{userId:user.id,username:user.username,role:user.role,
-      loginTime:U.now(),logoutTime:null,ipAddress:ip,status:'logged_in',sessionId:sess.id});
-    DB.update(T.users,user.id,{lastLogin:U.now(),lastIp:ip});
+    if(window.LoginHistoryStore&&LoginHistoryStore.insert){
+      LoginHistoryStore.insert({userId:user.id,username:user.username,role:user.role,
+        loginTime:U.now(),logoutTime:null,ipAddress:ip,status:'logged_in',sessionId:sess.id});
+    }else{
+      DB.insert(T.hist,{userId:user.id,username:user.username,role:user.role,
+        loginTime:U.now(),logoutTime:null,ipAddress:ip,status:'logged_in',sessionId:sess.id});
+    }
+    if(window.UserStore&&UserStore.update) UserStore.update(user.id,{lastLogin:U.now(),lastIp:ip});
+    else DB.update(T.users,user.id,{lastLogin:U.now(),lastIp:ip});
     // Use localStorage so session persists across browser restarts
     localStorage.setItem(SID_KEY, sess.id);
     Auth.s={...sess,user};
@@ -131,8 +139,13 @@ const Auth = {
     if(!Auth.s)return;
     const now=U.now(), sid=Auth.s.id, uid=Auth.s.userId;
     DB.update(T.sessions,sid,{active:false,logoutTime:now});
-    const h=DB.findOne(T.hist,x=>x.sessionId===sid&&x.status==='logged_in');
-    if(h) DB.update(T.hist,h.id,{logoutTime:now,status:'logged_out'});
+    const h=(window.LoginHistoryStore&&LoginHistoryStore.findActiveBySessionId)
+      ?LoginHistoryStore.findActiveBySessionId(sid)
+      :DB.findOne(T.hist,x=>x.sessionId===sid&&x.status==='logged_in');
+    if(h){
+      if(window.LoginHistoryStore&&LoginHistoryStore.update) LoginHistoryStore.update(h.id,{logoutTime:now,status:'logged_out'});
+      else DB.update(T.hist,h.id,{logoutTime:now,status:'logged_out'});
+    }
     const ci=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
     if(ci) DB.update(T.ci,ci.id,{checkoutTime:now,duration:Math.round((new Date()-new Date(ci.checkinTime))/60000)});
     localStorage.removeItem(SID_KEY);
@@ -144,19 +157,25 @@ const Auth = {
     if(!sid)return null;
     const sess=DB.findId(T.sessions,sid);
     if(!sess||!sess.active){localStorage.removeItem(SID_KEY);return null;}
-    const user=DB.findId(T.users,sess.userId);
+    const user=(window.UserStore&&UserStore.findById)?UserStore.findById(sess.userId):DB.findId(T.users,sess.userId);
     Auth.s={...sess,user};
     return Auth.s;
   },
 
   signup(d){
-    if(DB.findOne(T.users,u=>u.username.toLowerCase()===d.username.toLowerCase()))
+    if((window.UserStore&&UserStore.findByUsername)?UserStore.findByUsername(d.username):DB.findOne(T.users,u=>u.username.toLowerCase()===d.username.toLowerCase()))
       return {ok:false,err:'Username already taken.'};
-    if(d.email&&DB.findOne(T.users,u=>u.email.toLowerCase()===d.email.toLowerCase()))
+    if(d.email&&((window.UserStore&&UserStore.findByEmail)?UserStore.findByEmail(d.email):DB.findOne(T.users,u=>u.email.toLowerCase()===d.email.toLowerCase())))
       return {ok:false,err:'Email already registered.'};
-    DB.insert(T.users,{username:d.username,password:U.hashPwd(d.password),role:'user',
-      legalName:d.legalName||'',email:d.email||'',contactInfo:d.contact||'',
-      status:'active',createdBy:'signup',lastLogin:null,lastIp:null});
+    if(window.UserStore&&UserStore.insert){
+      UserStore.insert({username:d.username,password:U.hashPwd(d.password),role:'user',
+        legalName:d.legalName||'',email:d.email||'',contactInfo:d.contact||'',
+        status:'active',createdBy:'signup',lastLogin:null,lastIp:null});
+    }else{
+      DB.insert(T.users,{username:d.username,password:U.hashPwd(d.password),role:'user',
+        legalName:d.legalName||'',email:d.email||'',contactInfo:d.contact||'',
+        status:'active',createdBy:'signup',lastLogin:null,lastIp:null});
+    }
     return {ok:true};
   }
 };
@@ -165,11 +184,14 @@ const Auth = {
    BOOTSTRAP  – seed default data if first run
 ════════════════════════════════════════════════════ */
 function bootstrap(){
-  if(!DB.findOne(T.users,u=>u.username==='superadmin')){
-    DB.insert(T.users,{id:'superadmin_root',username:'superadmin',
+  const adminExists=(window.UserStore&&UserStore.findByUsername)?UserStore.findByUsername('superadmin'):DB.findOne(T.users,u=>u.username==='superadmin');
+  if(!adminExists){
+    const admin={id:'superadmin_root',username:'superadmin',
       password:U.hashPwd('superadmin'),role:'superadmin',legalName:'Super Administrator',
       email:'superadmin@watlogs.local',contactInfo:'',status:'active',
-      createdBy:'system',lastLogin:null,lastIp:null});
+      createdBy:'system',lastLogin:null,lastIp:null};
+    if(window.UserStore&&UserStore.insert) UserStore.insert(admin);
+    else DB.insert(T.users,admin);
   }
   const lkp=DB.all(T.lkp);
   if(!lkp.minLoginHours) DB.setLkp({minLoginHours:10,ipRestrictionEnabled:false,
