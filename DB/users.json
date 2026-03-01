@@ -1,0 +1,16 @@
+[
+  {
+    "id": "superadmin_root",
+    "username": "superadmin",
+    "password": "c3VwZXJhZG1pbl9fd2wyMDI0X18=",
+    "role": "superadmin",
+    "legalName": "Super Administrator",
+    "email": "superadmin@watlogs.local",
+    "contactInfo": "",
+    "status": "active",
+    "createdBy": "system",
+    "lastLogin": null,
+    "lastIp": null,
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  }
+]

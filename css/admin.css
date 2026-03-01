@@ -1,0 +1,9 @@
+/* Admin Portal Theme – Blue / Indigo */
+:root{
+  --primary:#2563eb;--primary-dk:#1d4ed8;
+  --sidebar:#1e3a5f;--sidebar-txt:#bfdbfe;
+  --bg:#eff6ff;
+}
+.form-control:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+#auth-view{background:linear-gradient(135deg,#1d4ed8,#1e3a5f)}
+.auth-logo h1{color:var(--primary)}
