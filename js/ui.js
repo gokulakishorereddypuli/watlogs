@@ -114,10 +114,10 @@ function loadApp(){
   showView('dashboard');
 }
 
-function doLogout(){
-  showConfirm('Sign Out','Are you sure you want to sign out?',()=>{
+async function doLogout(){
+  showConfirm('Sign Out','Are you sure you want to sign out?', async ()=>{
     if(_timerInterval){clearInterval(_timerInterval);_timerInterval=null;}
-    Auth.logout();
+    await Auth.logout();
     window.location.href = window.AUTH_PATH || '../';
   });
 }
