@@ -3,8 +3,6 @@
 /* ════════════════════════════════════════════════════
    CONSTANTS
 ════════════════════════════════════════════════════ */
-const PFX = 'wl_';
-const SID_KEY = 'wl_sid';
 const T = { users:'users', sessions:'sessions', hist:'login_history', ci:'checkins', lkp:'lookup' };
 
 /* ════════════════════════════════════════════════════
@@ -35,12 +33,11 @@ const U = {
 };
 
 /* ════════════════════════════════════════════════════
-   DATABASE  (localStorage — persists across sessions)
+   DATABASE  (server-backed JSON files via API)
 ════════════════════════════════════════════════════ */
 const DB = {
-  key: t => PFX+t,
-  all: t => { try{ const r=localStorage.getItem(DB.key(t)); return t===T.lkp?(r?JSON.parse(r):{}):r?JSON.parse(r):[]; }catch{ return t===T.lkp?{}:[]; } },
-  save: (t,d) => localStorage.setItem(DB.key(t),JSON.stringify(d)),
+  all: t => API.all(t),
+  save: (t,d) => API.save(t,d),
   findId: (t,id) => DB.all(t).find(r=>r.id===id)||null,
   findOne: (t,fn) => DB.all(t).find(fn)||null,
   find: (t,fn) => fn?DB.all(t).filter(fn):DB.all(t),
@@ -129,13 +126,13 @@ const Auth = {
     }
     if(window.UserStore&&UserStore.update) UserStore.update(user.id,{lastLogin:U.now(),lastIp:ip});
     else DB.update(T.users,user.id,{lastLogin:U.now(),lastIp:ip});
-    // Use localStorage so session persists across browser restarts
-    localStorage.setItem(SID_KEY, sess.id);
+    // Use a server-side cookie so the session persists across browser restarts
+    await API.setSession(sess.id);
     Auth.s={...sess,user};
     return {ok:true};
   },
 
-  logout(){
+  async logout(){
     if(!Auth.s)return;
     const now=U.now(), sid=Auth.s.id, uid=Auth.s.userId;
     DB.update(T.sessions,sid,{active:false,logoutTime:now});
@@ -148,15 +145,15 @@ const Auth = {
     }
     const ci=DB.findOne(T.ci,c=>c.userId===uid&&!c.checkoutTime);
     if(ci) DB.update(T.ci,ci.id,{checkoutTime:now,duration:Math.round((new Date()-new Date(ci.checkinTime))/60000)});
-    localStorage.removeItem(SID_KEY);
+    await API.clearSession();
     Auth.s=null;
   },
 
-  restore(){
-    const sid=localStorage.getItem(SID_KEY);
+  async restore(){
+    const sid=await API.getSession();
     if(!sid)return null;
     const sess=DB.findId(T.sessions,sid);
-    if(!sess||!sess.active){localStorage.removeItem(SID_KEY);return null;}
+    if(!sess||!sess.active){await API.clearSession();return null;}
     const user=(window.UserStore&&UserStore.findById)?UserStore.findById(sess.userId):DB.findId(T.users,sess.userId);
     Auth.s={...sess,user};
     return Auth.s;
@@ -183,7 +180,8 @@ const Auth = {
 /* ════════════════════════════════════════════════════
    BOOTSTRAP  – seed default data if first run
 ════════════════════════════════════════════════════ */
-function bootstrap(){
+async function bootstrap(){
+  await API.init();
   const adminExists=(window.UserStore&&UserStore.findByUsername)?UserStore.findByUsername('superadmin'):DB.findOne(T.users,u=>u.username==='superadmin');
   if(!adminExists){
     const admin={id:'superadmin_root',username:'superadmin',
